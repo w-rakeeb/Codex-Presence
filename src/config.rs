@@ -18,7 +18,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 13;
+const CONFIG_SCHEMA_VERSION: u32 = 15;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -53,6 +53,8 @@ pub struct PrivacyConfig {
     pub show_activity: bool,
     pub show_activity_target: bool,
     pub show_systems: bool,
+    pub show_custom_text: bool,
+    pub show_subscription: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,10 +69,11 @@ pub enum PrivacyField {
     Credits,
     ContextUsage,
     Systems,
+    CustomText,
 }
 
 impl PrivacyField {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::ProjectName,
         Self::GitBranch,
         Self::Model,
@@ -81,6 +84,7 @@ impl PrivacyField {
         Self::Credits,
         Self::ContextUsage,
         Self::Systems,
+        Self::CustomText,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -95,6 +99,7 @@ impl PrivacyField {
             Self::Credits => "Credits available",
             Self::ContextUsage => "Context usage",
             Self::Systems => "Systems",
+            Self::CustomText => "Custom text",
         }
     }
 
@@ -110,6 +115,7 @@ impl PrivacyField {
             Self::Credits => PresenceFieldId::Credits,
             Self::ContextUsage => PresenceFieldId::Context,
             Self::Systems => PresenceFieldId::Systems,
+            Self::CustomText => PresenceFieldId::Custom,
         }
     }
 
@@ -125,12 +131,13 @@ impl PrivacyField {
             PresenceFieldId::Credits => Self::Credits,
             PresenceFieldId::Context => Self::ContextUsage,
             PresenceFieldId::Systems => Self::Systems,
+            PresenceFieldId::Custom => Self::CustomText,
         }
     }
 
     pub const fn description(self) -> &'static str {
         match self {
-            Self::ProjectName => "Repository or folder name",
+            Self::ProjectName => "Chat title, with folder name as fallback",
             Self::GitBranch => "Current checked-out ref",
             Self::Model => "Model, reasoning, speed, and plan",
             Self::Activity => "Current Codex activity",
@@ -140,6 +147,7 @@ impl PrivacyField {
             Self::Credits => "Current Codex credit balance",
             Self::ContextUsage => "Current context-window percentage",
             Self::Systems => "Activity icon and workflow signal",
+            Self::CustomText => "Your custom presence text",
         }
     }
 
@@ -155,6 +163,7 @@ impl PrivacyField {
             Self::Credits => privacy.show_credits,
             Self::ContextUsage => privacy.show_context,
             Self::Systems => privacy.show_systems,
+            Self::CustomText => privacy.show_custom_text,
         }
     }
 
@@ -171,6 +180,7 @@ impl PrivacyField {
             Self::Credits => privacy.show_credits = value,
             Self::ContextUsage => privacy.show_context = value,
             Self::Systems => privacy.show_systems = value,
+            Self::CustomText => privacy.show_custom_text = value,
         }
     }
 }
@@ -450,6 +460,8 @@ impl DesktopPresenceDesign {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct DisplayConfig {
+    pub timer_mode: PresenceTimerMode,
+    pub separate_usage_line: bool,
     pub desktop_presence_design: DesktopPresenceDesign,
     pub large_image_key: String,
     pub large_text: String,
@@ -461,6 +473,18 @@ pub struct DisplayConfig {
     pub terminal_logo_mode: TerminalLogoMode,
     pub terminal_logo_path: Option<String>,
     pub presence_layout: PresenceLayoutConfig,
+    pub custom_text: String,
+    pub token_label: String,
+    pub context_label: String,
+    pub use_chat_title: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceTimerMode {
+    #[default]
+    Work,
+    Continuous,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -512,6 +536,8 @@ impl Default for PrivacyConfig {
             show_activity: true,
             show_activity_target: true,
             show_systems: true,
+            show_custom_text: false,
+            show_subscription: true,
         }
     }
 }
@@ -530,6 +556,8 @@ impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             desktop_presence_design: DesktopPresenceDesign::CodexApp,
+            timer_mode: PresenceTimerMode::Work,
+            separate_usage_line: true,
             large_image_key: "codex-logo".to_string(),
             large_text: "Codex".to_string(),
             desktop_large_image_key: "codex-app".to_string(),
@@ -540,6 +568,10 @@ impl Default for DisplayConfig {
             terminal_logo_mode: TerminalLogoMode::Auto,
             terminal_logo_path: None,
             presence_layout: PresenceLayoutConfig::default(),
+            custom_text: String::new(),
+            token_label: "TK".to_string(),
+            context_label: "CTX".to_string(),
+            use_chat_title: true,
         }
     }
 }
@@ -668,9 +700,32 @@ impl PresenceConfig {
                 PresenceFieldId::Credits => self.privacy.show_credits,
                 PresenceFieldId::Context => self.privacy.show_context,
                 PresenceFieldId::Systems => self.privacy.show_systems,
+                PresenceFieldId::Custom => self.privacy.show_custom_text,
             };
             if item.enabled != enabled {
                 item.enabled = enabled;
+                changed = true;
+            }
+        }
+
+        for (value, fallback, limit) in [
+            (&mut self.display.token_label, "TK", 16),
+            (&mut self.display.context_label, "CTX", 16),
+            (&mut self.display.custom_text, "", 128),
+        ] {
+            let text = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            let text: String = text
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(limit)
+                .collect();
+            let text = if text.is_empty() {
+                fallback.to_string()
+            } else {
+                text
+            };
+            if *value != text {
+                *value = text;
                 changed = true;
             }
         }
@@ -1201,7 +1256,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 13);
+        assert_eq!(cfg.schema_version, 15);
         assert!(cfg.presence_enabled);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
@@ -1240,17 +1295,10 @@ mod tests {
         let mut privacy = PrivacyConfig::default();
 
         for field in PrivacyField::ALL {
-            assert!(
-                field.is_enabled(&privacy),
-                "{} should default on",
-                field.label()
-            );
+            let before = field.is_enabled(&privacy);
+            assert_eq!(before, !matches!(field, PrivacyField::CustomText));
             field.toggle(&mut privacy);
-            assert!(
-                !field.is_enabled(&privacy),
-                "{} should toggle off",
-                field.label()
-            );
+            assert_ne!(field.is_enabled(&privacy), before);
         }
     }
 
@@ -1462,5 +1510,25 @@ mod tests {
             source.contains("if include_wsl_session_roots()"),
             "Windows WSL session scanning must stay opt-in before invoking wsl.exe"
         );
+    }
+
+    #[test]
+    fn legacy_settings_preserve_visibility_and_default_the_new_presence_controls() {
+        let mut config: PresenceConfig = serde_json::from_str(
+            r#"{"schema_version":13,"privacy":{"show_project_name":false,"show_model":false}}"#,
+        )
+        .unwrap();
+        config.normalize_for_runtime();
+        assert_eq!(config.schema_version, 15);
+        assert!(!config.privacy.show_project_name);
+        assert!(!config.privacy.show_model);
+        assert!(config.privacy.show_subscription);
+        assert!(!config.privacy.show_custom_text);
+        assert_eq!(config.display.token_label, "TK");
+        assert_eq!(config.display.context_label, "CTX");
+        assert!(config.display.use_chat_title);
+        config.display.custom_text = "  Multi\nline\ttext  ".into();
+        config.normalize_for_runtime();
+        assert_eq!(config.display.custom_text, "Multi line text");
     }
 }

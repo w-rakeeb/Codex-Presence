@@ -12,7 +12,11 @@ use crate::model::{ReasoningEffort, SpeedMode, model_requests_fast, resolve_mode
 
 pub fn setup_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = fmt().with_env_filter(filter).without_time().try_init();
+    let _ = fmt()
+        .with_env_filter(filter)
+        .with_writer(io::stderr)
+        .without_time()
+        .try_init();
 }
 
 pub fn silent_command(program: &str) -> Command {
@@ -21,8 +25,9 @@ pub fn silent_command(program: &str) -> Command {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const NORMAL_PRIORITY_CLASS: u32 = 0x20;
         let mut cmd = cmd;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(CREATE_NO_WINDOW | NORMAL_PRIORITY_CLASS);
         cmd
     }
     #[cfg(not(windows))]

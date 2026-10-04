@@ -23,13 +23,15 @@ use crate::telemetry::limits::{
 
 mod activity;
 mod costing;
+mod history;
 mod parser;
+mod titles;
 
 use activity::SessionAccumulator;
 pub(crate) use activity::{
     sanitize_domain_target, sanitize_file_target, summarize_command_for_presence,
 };
-use parser::{fetch_git_branch, parse_session_file_cached};
+use parser::{fetch_git_branch, parse_inactive_usage, parse_session_file_cached};
 #[cfg(test)]
 use parser::{parse_new_lines, parse_session_file, parse_utc_timestamp};
 
@@ -165,13 +167,29 @@ struct CachedBranch {
 #[derive(Debug, Default)]
 pub struct SessionParseCache {
     entries: HashMap<PathBuf, CachedSessionEntry>,
+    titles: titles::ChatTitles,
+    inactive_usage: HashMap<PathBuf, CachedInactiveUsage>,
+    history: history::HistoryCache,
 }
 
 impl SessionParseCache {
+    pub fn apply_chat_titles(&mut self, sessions: &mut [CodexSessionSnapshot]) {
+        self.titles.refresh(&crate::config::codex_home());
+        for session in sessions {
+            if let Some(title) = self.titles.get(&session.session_id) {
+                session.project_name = title.to_string();
+            }
+        }
+    }
     pub fn rate_limit_envelopes(&self) -> Vec<RateLimitEnvelope> {
         self.entries
             .values()
             .filter_map(|entry| entry.snapshot.as_ref())
+            .chain(
+                self.inactive_usage
+                    .values()
+                    .filter_map(|entry| entry.snapshot.as_ref()),
+            )
             .flat_map(|snapshot| snapshot.rate_limit_envelopes.iter().cloned())
             .collect()
     }
@@ -180,7 +198,12 @@ impl SessionParseCache {
         latest_limits_source_from(
             self.entries
                 .values()
-                .filter_map(|entry| entry.snapshot.as_ref()),
+                .filter_map(|entry| entry.snapshot.as_ref())
+                .chain(
+                    self.inactive_usage
+                        .values()
+                        .filter_map(|entry| entry.snapshot.as_ref()),
+                ),
         )
     }
 }
@@ -190,6 +213,13 @@ pub struct SessionCollectionDiagnostics {
     pub session_files_seen: usize,
     pub dropped_stale: usize,
     pub dropped_outside_sticky: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedInactiveUsage {
+    file_len: u64,
+    modified: SystemTime,
+    snapshot: Option<CodexSessionSnapshot>,
 }
 
 #[derive(Debug)]
@@ -301,6 +331,9 @@ pub fn collect_active_sessions_multi_with_diagnostics(
     parse_cache: &mut SessionParseCache,
     pricing_config: &PricingConfig,
 ) -> Result<(Vec<CodexSessionSnapshot>, SessionCollectionDiagnostics)> {
+    parse_cache
+        .history
+        .initialize(sessions_roots, &mut parse_cache.inactive_usage);
     let now = SystemTime::now();
     let stale_cutoff = now
         .checked_sub(stale_threshold)
@@ -340,6 +373,29 @@ pub fn collect_active_sessions_multi_with_diagnostics(
                 Ok(m) => m,
                 Err(_) => continue,
             };
+            if modified < sticky_cutoff && !parse_cache.entries.contains_key(path) {
+                if !parse_cache.inactive_usage.get(path).is_some_and(|entry| {
+                    entry.file_len == metadata.len() && entry.modified == modified
+                }) && let Ok(snapshot) =
+                    parse_inactive_usage(path, metadata.len(), modified, git_cache, pricing_config)
+                {
+                    parse_cache.history.changed = true;
+                    parse_cache.inactive_usage.insert(
+                        path.to_path_buf(),
+                        CachedInactiveUsage {
+                            file_len: metadata.len(),
+                            modified,
+                            snapshot,
+                        },
+                    );
+                }
+                diagnostics.dropped_outside_sticky =
+                    diagnostics.dropped_outside_sticky.saturating_add(1);
+                continue;
+            }
+            if parse_cache.inactive_usage.remove(path).is_some() {
+                parse_cache.history.changed = true;
+            }
             if let Some(mut snapshot) = parse_session_file_cached(
                 path,
                 &metadata,
@@ -367,6 +423,12 @@ pub fn collect_active_sessions_multi_with_diagnostics(
     parse_cache
         .entries
         .retain(|path, _| seen_paths.contains(path));
+    let history_count = parse_cache.inactive_usage.len();
+    parse_cache
+        .inactive_usage
+        .retain(|path, _| seen_paths.contains(path));
+    parse_cache.history.changed |= history_count != parse_cache.inactive_usage.len();
+    parse_cache.history.save(&parse_cache.inactive_usage);
     sessions = dedupe_sessions_by_id(sessions);
     sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
     Ok((sessions, diagnostics))
@@ -730,6 +792,59 @@ mod tests {
                 .map(|window| window.window_minutes),
             Some(10_080)
         );
+    }
+
+    #[test]
+    fn inactive_history_uses_a_small_usage_tail_and_reparses_fully_when_active() {
+        use std::io::{Seek, SeekFrom, Write};
+        let home = TempDir::new().unwrap();
+        let path = home.path().join("history.jsonl");
+        let mut file = File::create(&path).unwrap();
+        writeln!(
+            file,
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"history\",\"cwd\":\".\"}}}}"
+        )
+        .unwrap();
+        file.set_len(64 * 1024 * 1024).unwrap();
+        file.seek(SeekFrom::End(-300)).unwrap();
+        writeln!(file, "\n{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"rate_limits\":{{\"limit_id\":\"codex\",\"primary\":{{\"used_percent\":25,\"window_minutes\":300}}}}}}}}").unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(7200))
+            .unwrap();
+        let mut cache = SessionParseCache::default();
+        let mut git = GitBranchCache::new(Duration::from_secs(30));
+        collect_active_sessions(
+            home.path(),
+            Duration::from_secs(90),
+            Duration::from_secs(3600),
+            &mut git,
+            &mut cache,
+            &PricingConfig::default(),
+        )
+        .unwrap();
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.inactive_usage.len(), 1);
+        assert_eq!(
+            cache
+                .latest_limits_source()
+                .unwrap()
+                .limits
+                .primary()
+                .unwrap()
+                .remaining_percent,
+            75.0
+        );
+        std::fs::write(&path, "{\"type\":\"session_meta\",\"payload\":{\"id\":\"history\",\"cwd\":\".\"}}\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"total_tokens\":42}}}}\n").unwrap();
+        let sessions = collect_active_sessions(
+            home.path(),
+            Duration::from_secs(90),
+            Duration::from_secs(3600),
+            &mut git,
+            &mut cache,
+            &PricingConfig::default(),
+        )
+        .unwrap();
+        assert!(cache.inactive_usage.is_empty());
+        assert_eq!(sessions[0].session_total_tokens, Some(42));
     }
 
     #[test]

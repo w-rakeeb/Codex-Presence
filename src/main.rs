@@ -23,9 +23,52 @@ fn main() -> ExitCode {
 fn run() -> Result<u8> {
     setup_tracing();
     let cli = Cli::parse();
+    match &cli.command {
+        Some(Commands::ConfigGet) => {
+            let path = config::config_path();
+            let mut value = if path.exists() {
+                serde_json::from_str::<PresenceConfig>(&std::fs::read_to_string(path)?)?
+            } else {
+                PresenceConfig::default()
+            };
+            value.normalize_for_runtime();
+            println!("{}", serde_json::to_string(&value)?);
+            return Ok(0);
+        }
+        Some(Commands::ConfigCheck) => {
+            let mut value: PresenceConfig = serde_json::from_reader(std::io::stdin())?;
+            value.normalize_for_runtime();
+            println!("{}", serde_json::to_string(&value)?);
+            return Ok(0);
+        }
+        _ => {}
+    }
     let config = PresenceConfig::load_or_init()?;
 
     match cli.command {
+        Some(Commands::DesktopBridge { observe }) => {
+            let _guard = match process_guard::acquire_single_instance()? {
+                process_guard::AcquireState::Acquired(guard) => guard,
+                process_guard::AcquireState::AlreadyRunning { pid } => {
+                    anyhow::bail!(
+                        "Presence is already running (PID {pid:?}). Close that instance first."
+                    );
+                }
+            };
+            app::run_desktop_bridge(config, config::runtime_settings(), observe)?;
+            Ok(0)
+        }
+        Some(Commands::ConfigGet | Commands::ConfigCheck) => unreachable!(),
+        Some(Commands::TerminalView) => {
+            let _guard = match process_guard::acquire_single_instance()? {
+                process_guard::AcquireState::Acquired(guard) => guard,
+                process_guard::AcquireState::AlreadyRunning { pid } => anyhow::bail!(
+                    "Presence is already running (PID {pid:?}). Stop it before opening the terminal view."
+                ),
+            };
+            app::run(config, AppMode::SmartForeground, config::runtime_settings())?;
+            Ok(0)
+        }
         Some(Commands::Status) => {
             app::print_status(&config)?;
             Ok(0)

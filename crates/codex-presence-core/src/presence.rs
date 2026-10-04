@@ -15,10 +15,11 @@ pub enum PresenceFieldId {
     Credits,
     Context,
     Systems,
+    Custom,
 }
 
 impl PresenceFieldId {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Project,
         Self::Branch,
         Self::Model,
@@ -29,6 +30,7 @@ impl PresenceFieldId {
         Self::Credits,
         Self::Context,
         Self::Systems,
+        Self::Custom,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -43,6 +45,7 @@ impl PresenceFieldId {
             Self::Credits => "credits",
             Self::Context => "context",
             Self::Systems => "systems",
+            Self::Custom => "custom",
         }
     }
 
@@ -58,6 +61,7 @@ impl PresenceFieldId {
             "credits" => Some(Self::Credits),
             "context" => Some(Self::Context),
             "systems" => Some(Self::Systems),
+            "custom" => Some(Self::Custom),
             _ => None,
         }
     }
@@ -107,6 +111,11 @@ impl Default for PresenceLayoutConfig {
         Self {
             label_style: LabelStyle::Compact,
             fields: vec![
+                PresenceFieldConfig {
+                    field: Custom,
+                    enabled: false,
+                    zone: Details,
+                },
                 PresenceFieldConfig {
                     field: Activity,
                     enabled: true,
@@ -277,6 +286,7 @@ fn render_value(style: LabelStyle, field: PresenceFieldId, value: &str) -> Strin
         PresenceFieldId::Credits => "Credits",
         PresenceFieldId::Context => "Context",
         PresenceFieldId::Systems => "Systems",
+        PresenceFieldId::Custom => "Custom",
     };
     let normalized_value = value.trim().to_ascii_lowercase();
     if normalized_value.starts_with(&label.to_ascii_lowercase()) {

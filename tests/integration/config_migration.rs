@@ -84,11 +84,11 @@ fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() 
     };
 
     assert!(runtime.reload_from_path(&path));
-    assert_eq!(runtime.schema_version, 13);
+    assert_eq!(runtime.schema_version, 15);
     assert!(runtime.presence_enabled);
     assert!(!runtime.privacy.show_git_branch);
     assert!(runtime.privacy.show_credits);
-    assert_eq!(runtime.display.presence_layout.fields.len(), 10);
+    assert_eq!(runtime.display.presence_layout.fields.len(), 11);
     assert!(
         runtime
             .display
@@ -107,7 +107,7 @@ fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() 
     let persisted: serde_json::Value =
         serde_json::from_slice(&fs::read(path).expect("read migrated config"))
             .expect("parse migrated config");
-    assert_eq!(persisted["schema_version"], 13);
+    assert_eq!(persisted["schema_version"], 15);
     assert_eq!(persisted["presence_enabled"], true);
     assert_eq!(persisted["privacy"]["show_credits"], true);
 }
@@ -125,7 +125,9 @@ fn runtime_reload_applies_external_controls_and_keeps_last_good_on_invalid_repla
     external.privacy.enabled = true;
     external.privacy.show_activity_target = false;
     for field in PrivacyField::ALL {
-        field.toggle(&mut external.privacy);
+        if field.is_enabled(&external.privacy) {
+            field.toggle(&mut external.privacy);
+        }
     }
     external.display.desktop_presence_design = DesktopPresenceDesign::ChatGptApp;
     fs::write(

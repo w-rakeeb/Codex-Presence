@@ -26,7 +26,7 @@ mod windows {
 
     const PROCESS_POWER_THROTTLING: i32 = 4;
     const EXECUTION_SPEED: u32 = 1;
-    const IDLE_PRIORITY_CLASS: u32 = 0x40;
+    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x4000;
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -94,7 +94,7 @@ mod windows {
         {
             return Err(io::Error::last_os_error());
         }
-        if unsafe { SetPriorityClass(process, IDLE_PRIORITY_CLASS) } == 0 {
+        if unsafe { SetPriorityClass(process, BELOW_NORMAL_PRIORITY_CLASS) } == 0 {
             let error = io::Error::last_os_error();
             unsafe {
                 SetProcessInformation(
@@ -117,6 +117,7 @@ mod windows {
             assert_eq!(std::mem::size_of::<PowerState>(), 12);
             assert_eq!(PROCESS_POWER_THROTTLING, 4);
             assert_eq!(EXECUTION_SPEED, 1);
+            assert_eq!(BELOW_NORMAL_PRIORITY_CLASS, 0x4000);
         }
     }
 }

@@ -329,7 +329,11 @@ pub fn format_model_display(
         .filter(|effort| resolution.is_none_or(|model| model.supports_effort(*effort)));
     let speed = resolution
         .map(|model| model.resolve_speed(fast_active || model_requests_fast(model_id)))
-        .unwrap_or_default();
+        .unwrap_or(if fast_active || model_requests_fast(model_id) {
+            SpeedMode::Fast
+        } else {
+            SpeedMode::Standard
+        });
 
     let mut label = if resolution.is_some_and(|model| model.canonical_id().starts_with("gpt-"))
         && !base.starts_with("GPT-")
@@ -554,7 +558,7 @@ fn generic_model_label(model_id: &str) -> String {
     if trimmed.is_empty() {
         return "unknown".to_string();
     }
-    trimmed
+    let parts = trimmed
         .split('-')
         .filter(|part| !part.is_empty() && *part != "fast")
         .map(|part| match part.to_ascii_lowercase().as_str() {
@@ -571,8 +575,17 @@ fn generic_model_label(model_id: &str) -> String {
                     .unwrap_or_default()
             }
         })
-        .collect::<Vec<_>>()
-        .join("-")
+        .collect::<Vec<_>>();
+    if parts.first().is_some_and(|part| part == "GPT") && parts.len() > 1 {
+        let mut label = format!("GPT-{}", parts[1]);
+        if parts.len() > 2 {
+            label.push(' ');
+            label.push_str(&parts[2..].join(" "));
+        }
+        label
+    } else {
+        parts.join(" ")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -595,6 +608,19 @@ mod tests {
     #[test]
     fn bundled_catalog_is_valid() {
         assert_eq!(model_catalog().schema_version, 1);
+    }
+
+    #[test]
+    fn uncatalogued_model_labels_keep_observed_effort_and_speed_without_inventing_prices() {
+        assert!(resolve_model("gpt-6.1-sol").is_none());
+        assert_eq!(
+            format_model_display("gpt-6.1-sol", Some(ReasoningEffort::XHigh), false),
+            "GPT-6.1 Sol · Extra High"
+        );
+        assert_eq!(
+            format_model_display("gpt-6.1-sol", Some(ReasoningEffort::XHigh), true),
+            "GPT-6.1 Sol · Extra High · ⚡ Fast"
+        );
     }
 
     #[test]

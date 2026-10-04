@@ -522,6 +522,27 @@ impl SessionAccumulator {
         git_cache: &mut GitBranchCache,
         pricing_config: &PricingConfig,
     ) -> Option<CodexSessionSnapshot> {
+        self.build_snapshot_inner(jsonl_path, last_activity, git_cache, pricing_config, true)
+    }
+
+    pub(super) fn build_usage_snapshot(
+        &self,
+        jsonl_path: &Path,
+        last_activity: SystemTime,
+        git_cache: &mut GitBranchCache,
+        pricing_config: &PricingConfig,
+    ) -> Option<CodexSessionSnapshot> {
+        self.build_snapshot_inner(jsonl_path, last_activity, git_cache, pricing_config, false)
+    }
+
+    fn build_snapshot_inner(
+        &self,
+        jsonl_path: &Path,
+        last_activity: SystemTime,
+        git_cache: &mut GitBranchCache,
+        pricing_config: &PricingConfig,
+        include_git: bool,
+    ) -> Option<CodexSessionSnapshot> {
         let activity = self.activity_tracker.finalize(Utc::now());
         let session_delta_tokens = compute_session_delta(
             self.session_total_tokens,
@@ -552,7 +573,7 @@ impl SessionAccumulator {
             .map(ToString::to_string)
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "unknown-project".to_string());
-        let git_branch = git_cache.get(&cwd);
+        let git_branch = include_git.then(|| git_cache.get(&cwd)).flatten();
         let fallback_id = jsonl_path
             .file_stem()
             .and_then(|s| s.to_str())

@@ -139,6 +139,9 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         runtime.active_sticky_window,
         &config.pricing,
     ));
+    if config.display.use_chat_title {
+        parse_cache.apply_chat_titles(&mut sessions);
+    }
     let running = process_guard::inspect_running_instance()?;
     let (is_running, running_pid) = match running {
         RunningState::NotRunning => (false, None),
@@ -232,6 +235,9 @@ pub fn run_discord_proof(config: &PresenceConfig, output: Option<&Path>) -> Resu
         runtime.active_sticky_window,
         &config.pricing,
     ));
+    if config.display.use_chat_title {
+        parse_cache.apply_chat_titles(&mut sessions);
+    }
     let mut plan_detector = PlanDetector::new();
     let cached_limits = parse_cache.latest_limits_source();
     let cached_envelopes = parse_cache.rate_limit_envelopes();
@@ -741,6 +747,109 @@ fn run_headless_foreground(
     Ok(())
 }
 
+pub fn run_desktop_bridge(
+    mut config: PresenceConfig,
+    runtime: RuntimeSettings,
+    observe: bool,
+) -> Result<()> {
+    use std::io::{BufRead, Write};
+
+    let stop = install_stop_signal()?;
+    let input_stop = Arc::clone(&stop);
+    thread::spawn(move || {
+        for line in io::stdin().lock().lines() {
+            if line.map_or(true, |line| line.trim() == "quit") {
+                break;
+            }
+        }
+        input_stop.store(true, Ordering::Relaxed);
+    });
+    let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
+    let mut parse_cache = SessionParseCache::default();
+    let mut discord = DiscordPresence::new(config.effective_client_id());
+    let mut metrics_tracker = MetricsTracker::new();
+    let mut plan_detector = PlanDetector::new();
+    let sessions_roots = config::sessions_paths();
+    while !stop.load(Ordering::Relaxed) {
+        reload_runtime_config(&mut config);
+        let snapshot = collect_runtime_snapshot(
+            &sessions_roots,
+            &runtime,
+            &config,
+            &mut git_cache,
+            &mut parse_cache,
+            &mut metrics_tracker,
+            &mut plan_detector,
+        )?;
+        if !observe {
+            publish_runtime_snapshot(&mut discord, &snapshot, &config, PresenceSurface::Desktop);
+        }
+        let active = snapshot.active_session();
+        let surface = active
+            .and_then(CodexSessionSnapshot::detected_surface)
+            .unwrap_or(PresenceSurface::Desktop);
+        let preview = match active {
+            Some(session) => crate::discord::active_presence_presentation_with_credits(
+                surface,
+                session,
+                snapshot.effective_limits(),
+                snapshot.effective_credits(),
+                &snapshot.resolved_plan,
+                &snapshot.resolved_service_tier,
+                &config,
+            ),
+            None => crate::discord::idle_presence_presentation(surface, &config),
+        };
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "snapshot_at": Utc::now(),
+            "discord_status": if observe { "Monitoring only" } else { discord.status() },
+            "presence_enabled": config.presence_enabled && !observe,
+            "plan": snapshot.resolved_plan.status_label(),
+            "plan_details": snapshot.resolved_plan,
+            "speed": snapshot.resolved_service_tier.fast_mode_label(),
+            "service_tier": {
+                "tier": snapshot.resolved_service_tier.tier.label(),
+                "raw_tier": snapshot.resolved_service_tier.raw_tier,
+                "observed_at": snapshot.resolved_service_tier.observed_at,
+                "source_path": snapshot.resolved_service_tier.source_path
+            },
+            "active_session_id": active.map(|session| &session.session_id),
+            "sessions": snapshot.sessions,
+            "limits": snapshot.effective_limits(),
+            "credits": snapshot.effective_credits(),
+            "limits_source": snapshot.limits_source.as_ref().map(|selection| serde_json::json!({
+                "source_session_id": selection.source_session_id,
+                "source_limit_id": selection.source_limit_id,
+                "source_scope": selection.source_scope,
+                "observed_at": selection.observed_at,
+                "label": selection.source_label()
+            })),
+            "metrics": metrics_tracker.snapshot(),
+            "preview": {
+                "app_name": preview.app_name,
+                "details": preview.details,
+                "state": preview.state,
+                "large_image_key": preview.large_image_key,
+                "large_text": preview.large_text,
+                "small_image_key": preview.small_image_key,
+                "small_text": preview.small_text
+            }
+        });
+        let mut output = io::stdout().lock();
+        serde_json::to_writer(&mut output, &value)?;
+        writeln!(output)?;
+        output.flush()?;
+        drop(output);
+        let deadline = Instant::now() + runtime.poll_interval.max(Duration::from_millis(250));
+        while Instant::now() < deadline && !stop.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    discord.shutdown();
+    Ok(())
+}
+
 fn maybe_relaunch_in_terminal() -> Result<bool> {
     if env::var_os(RELAUNCH_GUARD_ENV).is_some() {
         return Ok(false);
@@ -973,6 +1082,9 @@ fn collect_runtime_snapshot(
         runtime.active_sticky_window,
         &config.pricing,
     ));
+    if config.display.use_chat_title {
+        parse_cache.apply_chat_titles(&mut sessions);
+    }
     metrics_tracker.update(&sessions);
     metrics_tracker.persist_if_due();
     let cached_limits = parse_cache.latest_limits_source();
@@ -1009,6 +1121,11 @@ fn reload_runtime_config(config: &mut PresenceConfig) -> bool {
 }
 
 fn runtime_surface_hint() -> PresenceSurface {
+    if let Ok(value) = env::var("CODEX_PRESENCE_SURFACE")
+        && let Some(surface) = PresenceSurface::detect(Some(&value), None)
+    {
+        return surface;
+    }
     let lineage_surface = process_lineage_surface();
     if let Some(surface @ (PresenceSurface::Desktop | PresenceSurface::VsCode)) = lineage_surface {
         surface
@@ -1087,8 +1204,10 @@ fn process_lineage_text() -> Option<String> {
     let script = format!(
         r#"$processId = {process_id}
 $lines = [System.Collections.Generic.List[string]]::new()
+$processes = @{{}}
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {{ $processes[[uint32]$_.ProcessId] = $_ }}
 for ($depth = 0; $depth -lt 8; $depth++) {{
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+    $process = $processes[[uint32]$processId]
     if ($null -eq $process) {{ break }}
     [void]$lines.Add("$($process.Name) $($process.CommandLine)")
     if ($process.ParentProcessId -eq 0 -or $process.ParentProcessId -eq $processId) {{ break }}
@@ -1496,8 +1615,8 @@ explorer.exe"#;
 
         assert_eq!(
             source.matches(&reload_call).count(),
-            3,
-            "TUI, headless, and wrapper loops must reload through the same boundary"
+            4,
+            "TUI, headless, desktop, and wrapper loops must reload through the same boundary"
         );
     }
 

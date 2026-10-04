@@ -1,7 +1,7 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -80,6 +80,77 @@ pub(super) fn parse_session_file_cached(
             .build_snapshot(jsonl_path, last_activity, git_cache, pricing_config);
     cached.snapshot = snapshot.clone();
     Ok(snapshot)
+}
+
+pub(super) fn parse_inactive_usage(
+    path: &Path,
+    file_len: u64,
+    modified: SystemTime,
+    git_cache: &mut GitBranchCache,
+    pricing: &PricingConfig,
+) -> Result<Option<CodexSessionSnapshot>> {
+    let mut file = File::open(path)?;
+    let mut header = Vec::new();
+    (&mut file).take(65_536).read_to_end(&mut header)?;
+    let header = String::from_utf8_lossy(&header);
+    let metadata = header
+        .lines()
+        .next()
+        .and_then(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|value| value["type"] == "session_meta");
+    let mut size = 262_144_u64.min(file_len);
+    loop {
+        let offset = file_len.saturating_sub(size);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        let text = String::from_utf8_lossy(&bytes);
+        let mut accumulator = SessionAccumulator::default();
+        if let Some(metadata) = &metadata {
+            accumulator.apply_event(metadata);
+        }
+        for line in text.lines().skip(usize::from(offset > 0)) {
+            if line.contains("\"rate_limits\"")
+                && let Ok(event) = serde_json::from_str::<Value>(line)
+                && !event["payload"]["rate_limits"].is_null()
+            {
+                accumulator.apply_event(&event);
+            }
+        }
+        let snapshot = accumulator.build_usage_snapshot(path, modified, git_cache, pricing);
+        let global = snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot
+                .rate_limit_envelopes
+                .iter()
+                .any(|envelope| envelope.scope == super::RateLimitScope::GlobalAccount)
+        });
+        if !global && offset > 0 && size >= 4_194_304 {
+            file.seek(SeekFrom::Start(0))?;
+            accumulator = SessionAccumulator::default();
+            if let Some(metadata) = &metadata {
+                accumulator.apply_event(metadata);
+            }
+            let mut reader = BufReader::new(&mut file);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line)? == 0 {
+                    break;
+                }
+                if line.contains("\"rate_limits\"")
+                    && let Ok(event) = serde_json::from_str::<Value>(&line)
+                    && !event["payload"]["rate_limits"].is_null()
+                {
+                    accumulator.apply_event(&event);
+                }
+            }
+            return Ok(accumulator.build_usage_snapshot(path, modified, git_cache, pricing));
+        }
+        if global || offset == 0 {
+            return Ok(snapshot);
+        }
+        size = size.saturating_mul(4).min(file_len).min(4_194_304);
+    }
 }
 
 pub(super) fn parse_new_lines(
@@ -245,14 +316,15 @@ pub(super) fn parse_utc_timestamp(text: String) -> Option<DateTime<Utc>> {
 }
 
 pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
-    let output = crate::util::silent_command("git")
-        .arg("-C")
-        .arg(project_path)
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("HEAD")
-        .output()
-        .ok()?;
+    let repository = std::env::var_os("GIT_DIR").is_some()
+        || project_path
+            .ancestors()
+            .any(|path| path.join(".git").exists())
+        || (project_path.join("HEAD").is_file() && project_path.join("objects").is_dir());
+    if !repository {
+        return None;
+    }
+    let output = git_query(project_path, &["--abbrev-ref", "HEAD"])?;
 
     if !output.status.success() {
         return None;
@@ -260,14 +332,7 @@ pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
 
     let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if branch == "HEAD" {
-        let output = crate::util::silent_command("git")
-            .arg("-C")
-            .arg(project_path)
-            .arg("rev-parse")
-            .arg("--short")
-            .arg("HEAD")
-            .output()
-            .ok()?;
+        let output = git_query(project_path, &["--short", "HEAD"])?;
         if !output.status.success() {
             return None;
         }
@@ -275,6 +340,32 @@ pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
         return (!short.is_empty()).then_some(short);
     }
     (!branch.is_empty()).then_some(branch)
+}
+
+fn git_query(project_path: &Path, arguments: &[&str]) -> Option<std::process::Output> {
+    use std::process::Stdio;
+    let mut child = crate::util::silent_command("git")
+        .arg("-C")
+        .arg(project_path)
+        .arg("rev-parse")
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 pub(super) fn str_at(value: &Value, path: &[&str]) -> Option<String> {

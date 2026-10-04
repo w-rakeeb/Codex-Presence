@@ -16,6 +16,13 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    DesktopBridge {
+        #[arg(long)]
+        observe: bool,
+    },
+    ConfigGet,
+    ConfigCheck,
+    TerminalView,
     /// Run Codex as a child process while presence follows its lifecycle.
     #[command(trailing_var_arg = true)]
     Codex {

@@ -2,13 +2,13 @@
 
 This reference describes the process policy used by the Windows builds. It is a scheduling request, not a measured promise about energy savings.
 
-The application calls `SetProcessInformation` with `ProcessPowerThrottling`, sets the execution-speed control/state bits and selects `IDLE_PRIORITY_CLASS`. It changes only its own process. Unrelated power-throttling flags remain intact. If the priority update fails, the previous throttling state is restored. Unsupported API calls do not prevent startup.
+The application calls `SetProcessInformation` with `ProcessPowerThrottling`, sets the execution-speed control/state bits and selects `BELOW_NORMAL_PRIORITY_CLASS`. This balances background work with timely updates; Idle priority could starve the engine under CPU load. Short-lived diagnostic and Git helpers launch at Normal priority, and Git queries time out after 500 ms. Unrelated power-throttling flags remain intact. If the priority update fails, the previous throttling state is restored. Unsupported API calls do not prevent startup.
 
 Windows 11 interprets the execution-speed request as EcoQoS. Task Manager owns the leaf indicator; application code does not fabricate it. Other operating systems keep their normal scheduling policy.
 
 ## Verify a running process
 
-Use `scripts/check-windows-efficiency.ps1 -ProcessId 1234`, replacing the example ID with the application's PID. A successful enabled state reports `eco_qos: true`, `idle_priority: true` and priority class `64`. The verifier opens a query-only process handle and does not change the process.
+Use `scripts/check-windows-efficiency.ps1 -ProcessId 1234`, replacing the example ID with the application's PID. A successful enabled state reports `eco_qos: true`, `below_normal_priority: true` and priority class `16384`. The verifier opens a query-only process handle and does not change the process.
 
 ## Opt out
 

@@ -22,5 +22,5 @@ try {
     $state.Version = 1
     if (-not [WindowsEfficiencyProbe]::GetProcessInformation($handle, 4, [ref]$state, 12)) { throw 'Windows did not return process power-throttling state' }
     $priority = [WindowsEfficiencyProbe]::GetPriorityClass($handle)
-    [pscustomobject]@{ pid=$ProcessId; path=$process.Path; eco_qos=(($state.ControlMask -band 1) -ne 0 -and ($state.StateMask -band 1) -ne 0); idle_priority=($priority -eq 0x40); priority_class=$priority; control_mask=$state.ControlMask; state_mask=$state.StateMask } | ConvertTo-Json
+    [pscustomobject]@{ pid=$ProcessId; path=$process.Path; eco_qos=(($state.ControlMask -band 1) -ne 0 -and ($state.StateMask -band 1) -ne 0); idle_priority=($priority -eq 0x40); below_normal_priority=($priority -eq 0x4000); priority_class=$priority; control_mask=$state.ControlMask; state_mask=$state.StateMask } | ConvertTo-Json
 } finally { [WindowsEfficiencyProbe]::CloseHandle($handle) | Out-Null }

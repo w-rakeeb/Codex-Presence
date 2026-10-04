@@ -8,3 +8,6 @@
 /releases/
 /plans/
 .gitnexus
+/desktop/bin/
+/desktop/obj/
+/Data/
