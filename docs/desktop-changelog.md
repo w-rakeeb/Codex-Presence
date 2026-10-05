@@ -1,5 +1,18 @@
 # Desktop release notes
 
+## 1.6.0
+
+- Changed the Discord context suffix to **Used**.
+- Added configurable automatic idle hiding, from 1 to 1440 minutes. It clears the whole presence after inactivity and restores it when work resumes, preserving manual Pause and game priority. New activity resets the timeout; a stale working label can expire, while pending commands remain visible.
+- Reorganized Settings into Appearance, Activity, Background and Advanced. Section changes retain edits, and invalid values reveal the relevant section.
+- Added Slate, Forest and Dusk color themes with dark/light variants, independent of the five interface styles. Appearance previews immediately; Save keeps it and Reload restores the saved appearance.
+- Added consistent navigation icons, moved the text layout controls to the top of Layout, consolidated application/label controls and improved field-order accessibility labels.
+- Disabled dependent idle, priority and manual-plan controls when their parent option is inactive. Added an idle countdown to the dashboard.
+- Preserved the active tab and newer edits when an asynchronous save completes. Unsaved appearance previews also survive that save.
+- Configuration schema 17 defaults idle hiding to off and preserves existing preferences.
+
+Verified on Windows 11 x64: 284 Rust tests and 205 desktop checks in each drive configuration. Forty style/theme/mode combinations pass compact layout and text/button contrast checks. Fixtures exercise parsed idle expiry and restoration without publishing activity. Windows 10 execution and live game priority transitions remain unverified.
+
 ## 1.5.0
 
 - Restored activity/project ahead of model text in the grouped layout.

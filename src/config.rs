@@ -18,7 +18,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 16;
+const CONFIG_SCHEMA_VERSION: u32 = 17;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -462,6 +462,7 @@ impl DesktopPresenceDesign {
 pub struct DisplayConfig {
     pub timer_mode: PresenceTimerMode,
     pub pause_timer_when_idle: bool,
+    pub idle_timeout_minutes: u32,
     pub separate_usage_line: bool,
     pub activity_project_heading: bool,
     pub desktop_presence_design: DesktopPresenceDesign,
@@ -560,6 +561,7 @@ impl Default for DisplayConfig {
             desktop_presence_design: DesktopPresenceDesign::CodexApp,
             timer_mode: PresenceTimerMode::Work,
             pause_timer_when_idle: false,
+            idle_timeout_minutes: 0,
             separate_usage_line: true,
             activity_project_heading: false,
             large_image_key: "codex-logo".to_string(),
@@ -667,6 +669,11 @@ impl PresenceConfig {
     fn normalize_and_migrate(&mut self) -> bool {
         let mut changed = false;
         let default_display = DisplayConfig::default();
+
+        if self.display.idle_timeout_minutes > 1440 {
+            self.display.idle_timeout_minutes = 1440;
+            changed = true;
+        }
 
         if self.schema_version < CONFIG_SCHEMA_VERSION {
             self.schema_version = CONFIG_SCHEMA_VERSION;
@@ -1260,7 +1267,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 16);
+        assert_eq!(cfg.schema_version, 17);
         assert!(cfg.presence_enabled);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
@@ -1523,7 +1530,7 @@ mod tests {
         )
         .unwrap();
         config.normalize_for_runtime();
-        assert_eq!(config.schema_version, 16);
+        assert_eq!(config.schema_version, 17);
         assert!(!config.privacy.show_project_name);
         assert!(!config.privacy.show_model);
         assert!(config.privacy.show_subscription);
@@ -1534,8 +1541,23 @@ mod tests {
         assert!(config.display.separate_usage_line);
         assert!(!config.display.activity_project_heading);
         assert!(!config.display.pause_timer_when_idle);
+        assert_eq!(config.display.idle_timeout_minutes, 0);
         config.display.custom_text = "  Multi\nline\ttext  ".into();
         config.normalize_for_runtime();
         assert_eq!(config.display.custom_text, "Multi line text");
+    }
+
+    #[test]
+    fn idle_timeout_migration_preserves_values_and_bounds_the_supported_range() {
+        let mut config: PresenceConfig = serde_json::from_str(
+            r#"{"schema_version":16,"display":{"idle_timeout_minutes":12,"token_label":"Token"}}"#,
+        )
+        .unwrap();
+        config.normalize_for_runtime();
+        assert_eq!(config.display.idle_timeout_minutes, 12);
+        assert_eq!(config.display.token_label, "Token");
+        config.display.idle_timeout_minutes = u32::MAX;
+        config.normalize_for_runtime();
+        assert_eq!(config.display.idle_timeout_minutes, 1440);
     }
 }

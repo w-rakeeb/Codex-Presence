@@ -46,6 +46,7 @@ pub struct DiscordPresence {
     timer_base_epoch: Option<i64>,
     timer_idle_since: Option<i64>,
     timer_idle_seconds: i64,
+    idle_timeout: IdlePresenceTimeout,
     paused: bool,
     #[cfg(test)]
     clear_attempts: u32,
@@ -66,6 +67,59 @@ const RECONNECT_MIN_BACKOFF: Duration = Duration::from_secs(1);
 const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(15);
 const IDLE_STATE: &str = "Waiting for a session";
 const PAUSED_STATUS: &str = "Paused";
+
+#[derive(Default)]
+struct IdlePresenceTimeout {
+    since: Option<i64>,
+}
+
+impl IdlePresenceTimeout {
+    fn remaining_at(
+        &mut self,
+        session: Option<&CodexSessionSnapshot>,
+        minutes: u32,
+        now: i64,
+    ) -> Option<u64> {
+        if minutes == 0 {
+            self.since = None;
+            return None;
+        }
+        let signal = session.map(|value| {
+            value
+                .activity
+                .as_ref()
+                .and_then(|activity| activity.last_effective_signal_at.max(activity.observed_at))
+                .map(|time| time.timestamp())
+                .or_else(|| system_time_to_epoch(value.last_activity))
+                .unwrap_or(now)
+                .min(now)
+        });
+        let working = session.is_some_and(|value| {
+            value.activity.as_ref().is_some_and(|activity| {
+                activity.pending_calls > 0
+                    || (!matches!(
+                        activity.kind,
+                        SessionActivityKind::Idle | SessionActivityKind::WaitingInput
+                    ) && signal.is_some_and(|signal| {
+                        now.saturating_sub(signal) < i64::from(minutes).saturating_mul(60)
+                    }))
+            })
+        });
+        if working {
+            self.since = None;
+            return None;
+        }
+        let since = self.since.get_or_insert(signal.unwrap_or(now));
+        if let Some(signal) = signal {
+            *since = (*since).max(signal);
+        }
+        Some(
+            u64::from(minutes)
+                .saturating_mul(60)
+                .saturating_sub(now.saturating_sub(*since).max(0) as u64),
+        )
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresencePresentation {
@@ -148,6 +202,7 @@ impl DiscordPresence {
             timer_base_epoch: None,
             timer_idle_since: None,
             timer_idle_seconds: 0,
+            idle_timeout: IdlePresenceTimeout::default(),
             #[cfg(test)]
             clear_attempts: 0,
             #[cfg(test)]
@@ -159,6 +214,16 @@ impl DiscordPresence {
 
     pub fn status(&self) -> &str {
         &self.last_status
+    }
+
+    pub(crate) fn idle_timeout_remaining_at(
+        &mut self,
+        session: Option<&CodexSessionSnapshot>,
+        config: &PresenceConfig,
+        now: i64,
+    ) -> Option<u64> {
+        self.idle_timeout
+            .remaining_at(session, config.display.idle_timeout_minutes, now)
     }
 
     fn start_epoch(
@@ -211,7 +276,13 @@ impl DiscordPresence {
         self.surface = detect_surface(active_session, fallback_surface, self.last_known_surface);
         self.last_known_surface = self.surface;
         let timer_epoch = self.timer_epoch_at(active_session, config, Utc::now().timestamp());
-        if !self.apply_presence_enabled(config.presence_enabled)? {
+        let idle_hidden =
+            self.idle_timeout_remaining_at(active_session, config, Utc::now().timestamp())
+                == Some(0);
+        if !self.apply_presence_enabled(config.presence_enabled && !idle_hidden)? {
+            if idle_hidden && config.presence_enabled {
+                self.last_status = "Hidden · idle timeout reached".to_string();
+            }
             return Ok(());
         }
         let desired_client_id = config.effective_client_id_for_surface(self.surface);
@@ -1349,7 +1420,7 @@ fn token_state_part(session: &CodexSessionSnapshot, label: &str) -> Option<Strin
 fn context_state_part(session: &CodexSessionSnapshot, label: &str) -> Option<String> {
     let context = session.context_window.as_ref()?;
     Some(format!(
-        "{label} {:.0}% used",
+        "{label} {:.0}% Used",
         (100.0 - context.remaining_percent).clamp(0.0, 100.0)
     ))
 }
@@ -1666,6 +1737,108 @@ mod tests {
     }
 
     #[test]
+    fn idle_timeout_uses_the_selected_minutes_and_resets_after_work() {
+        let mut timeout = IdlePresenceTimeout::default();
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: SessionActivityKind::WaitingInput,
+            observed_at: chrono::DateTime::from_timestamp(100, 0),
+            ..Default::default()
+        });
+        assert_eq!(timeout.remaining_at(Some(&session), 2, 150), Some(70));
+        assert_eq!(timeout.remaining_at(Some(&session), 2, 219), Some(1));
+        assert_eq!(timeout.remaining_at(Some(&session), 2, 220), Some(0));
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::Thinking;
+        session.activity.as_mut().unwrap().observed_at = chrono::DateTime::from_timestamp(230, 0);
+        assert_eq!(timeout.remaining_at(Some(&session), 2, 230), None);
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::WaitingInput;
+        session.activity.as_mut().unwrap().observed_at = chrono::DateTime::from_timestamp(240, 0);
+        assert_eq!(timeout.remaining_at(Some(&session), 2, 250), Some(110));
+        assert_eq!(timeout.remaining_at(Some(&session), 0, 500), None);
+    }
+
+    #[test]
+    fn idle_timeout_handles_missing_sessions_unknown_activity_and_long_running_calls() {
+        let mut timeout = IdlePresenceTimeout::default();
+        assert_eq!(timeout.remaining_at(None, 1, 100), Some(60));
+        assert_eq!(timeout.remaining_at(None, 1, 160), Some(0));
+        let mut session = sample_session();
+        session.activity = None;
+        session.last_activity = SystemTime::UNIX_EPOCH + Duration::from_secs(170);
+        assert_eq!(timeout.remaining_at(Some(&session), 1, 180), Some(50));
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: SessionActivityKind::RunningCommand,
+            pending_calls: 1,
+            observed_at: chrono::DateTime::from_timestamp(170, 0),
+            ..Default::default()
+        });
+        assert_eq!(timeout.remaining_at(Some(&session), 1, 5000), None);
+        session.activity.as_mut().unwrap().pending_calls = 0;
+        assert_eq!(timeout.remaining_at(Some(&session), 1, 5000), Some(0));
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::Thinking;
+        session.activity.as_mut().unwrap().observed_at = chrono::DateTime::from_timestamp(5001, 0);
+        assert_eq!(timeout.remaining_at(Some(&session), 1, 5001), None);
+        assert_eq!(timeout.remaining_at(None, 1, 5001), Some(60));
+    }
+
+    #[test]
+    fn idle_timeout_clear_is_idempotent_and_resume_preserves_manual_pause() {
+        let mut presence =
+            DiscordPresence::new(Some(crate::config::DEFAULT_DISCORD_CLIENT_ID.to_string()));
+        presence.suppress_ipc_connect = true;
+        let mut config = PresenceConfig::default();
+        config.display.idle_timeout_minutes = 1;
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: SessionActivityKind::WaitingInput,
+            observed_at: Some(Utc::now() - chrono::Duration::minutes(3)),
+            ..Default::default()
+        });
+        for _ in 0..2 {
+            presence
+                .update(
+                    Some(&session),
+                    None,
+                    &resolved_plan_pro(),
+                    &resolved_service_tier(false),
+                    &config,
+                    PresenceSurface::Desktop,
+                )
+                .unwrap();
+        }
+        assert_eq!(presence.clear_attempts, 1);
+        assert_eq!(presence.status(), "Hidden · idle timeout reached");
+        assert!(config.presence_enabled);
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::Thinking;
+        session.activity.as_mut().unwrap().observed_at = Some(Utc::now());
+        presence
+            .update(
+                Some(&session),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config,
+                PresenceSurface::Desktop,
+            )
+            .unwrap();
+        assert!(!presence.paused);
+        assert_eq!(presence.connect_attempts, 1);
+        config.presence_enabled = false;
+        presence
+            .update(
+                Some(&session),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config,
+                PresenceSurface::Desktop,
+            )
+            .unwrap();
+        assert!(presence.paused);
+        assert_eq!(presence.status(), "Paused");
+    }
+
+    #[test]
     fn work_timer_restarts_with_new_work_and_missing_sessions_pause() {
         let mut config = PresenceConfig::default();
         config.display.pause_timer_when_idle = true;
@@ -1713,7 +1886,7 @@ mod tests {
             assert!(!details.contains("GPT-"), "{details}");
             assert!(state.starts_with("GPT-5.6 Sol"), "{state}");
             assert_eq!(state.contains('⚡'), fast);
-            assert!(state.contains("Token: 30.0K - Context: 6% used"), "{state}");
+            assert!(state.contains("Token: 30.0K - Context: 6% Used"), "{state}");
             config.privacy.show_tokens = false;
             let (_, hidden_tokens) = presence_lines(
                 &session,
@@ -1779,7 +1952,7 @@ mod tests {
                     assert_eq!(presentation.details.contains('⚡'), fast);
                     assert!(!presentation.details.contains("Thinking"));
                     assert!(!presentation.details.contains("project-alpha"));
-                    assert_eq!(presentation.state, "Token: 30.0K - Context: 6% used");
+                    assert_eq!(presentation.state, "Token: 30.0K - Context: 6% Used");
                     let branding = display_branding(surface, &config);
                     assert_eq!(presentation.large_text, branding.large_text);
                     assert_eq!(presentation.large_image_key, branding.large_image_key);
@@ -1810,7 +1983,7 @@ mod tests {
                     assert_eq!(normal.app_name, application_name);
                     assert_eq!(normal.details, "Thinking - project-alpha");
                     assert!(normal.state.starts_with("GPT-5.6 Sol"));
-                    assert!(normal.state.contains(" • Token: 30.0K - Context: 6% used"));
+                    assert!(normal.state.contains(" • Token: 30.0K - Context: 6% Used"));
                 }
             }
         }
@@ -2096,7 +2269,7 @@ mod tests {
         assert!(state.contains("GPT-5.3 Codex | Pro 20x ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K TK"));
-        assert!(state.contains("CTX 6% used"));
+        assert!(state.contains("CTX 6% Used"));
         assert!(state.contains("5h 64% remaining"));
         assert!(state.contains("7d 18% remaining"));
     }
@@ -2867,7 +3040,7 @@ mod tests {
             );
             assert!(state.contains("GPT-5.6 Sol"));
             assert!(state.contains("30.0K TOKENS"));
-            assert!(state.contains("WINDOW 6% used"));
+            assert!(state.contains("WINDOW 6% Used"));
             assert!(!state.contains("Pro 20x"));
             assert!(!state.contains("/month"));
             assert_eq!(state.contains("Fast"), fast);

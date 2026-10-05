@@ -787,6 +787,10 @@ pub fn run_desktop_bridge(
             &mut plan_detector,
         )?;
         let priority_held = priority.load(Ordering::Relaxed);
+        let active = snapshot.active_session();
+        let idle_remaining =
+            discord.idle_timeout_remaining_at(active, &config, Utc::now().timestamp());
+        let idle_hidden = idle_remaining == Some(0);
         if !observe {
             if priority_held {
                 let mut publication = config.clone();
@@ -806,7 +810,6 @@ pub fn run_desktop_bridge(
                 );
             }
         }
-        let active = snapshot.active_session();
         let surface = active
             .and_then(CodexSessionSnapshot::detected_surface)
             .unwrap_or(PresenceSurface::Desktop);
@@ -825,9 +828,11 @@ pub fn run_desktop_bridge(
         let value = serde_json::json!({
             "schema_version": 1,
             "snapshot_at": Utc::now(),
-            "discord_status": if priority_held { "Priority app active · Codex presence cleared" } else if observe { "Monitoring only" } else { discord.status() },
-            "presence_enabled": config.presence_enabled && !observe && !priority_held,
+            "discord_status": if priority_held { "Priority app active · Codex presence cleared" } else if idle_hidden { "Hidden · idle timeout reached" } else if observe { "Monitoring only" } else { discord.status() },
+            "presence_enabled": config.presence_enabled && !observe && !priority_held && !idle_hidden,
             "priority_held": priority_held,
+            "idle_timeout_hidden": idle_hidden,
+            "idle_timeout_remaining_seconds": idle_remaining,
             "timer_paused": crate::discord::timer_should_pause(active, &config),
             "plan": snapshot.resolved_plan.status_label(),
             "plan_details": snapshot.resolved_plan,

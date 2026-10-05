@@ -18,14 +18,17 @@ The release is tested on Windows 11 x64. It uses Windows 10 compatible controls,
 ## Features
 
 - Chat titles, activity, model, effort, tokens, context and available usage information from local Codex sessions.
-- Activity/project first, followed by model/effort and grouped `Token: 29.5M - Context: 85% used` text, with custom labels and visibility controls.
+- Activity/project first, followed by model/effort and grouped `Token: 29.5M - Context: 85% Used` text, with custom labels and visibility controls.
 - An optional activity/project heading for three independent text groups; the normal Codex App or ChatGPT App heading remains the default.
 - Continuous elapsed time since the companion opens, or elapsed time based on work and project activity.
 - Optional idle/waiting timer pause, with idle intervals excluded from continuous elapsed time.
+- Configurable idle hiding: choose 1–1440 minutes before the entire Discord presence disappears, with automatic restoration when work resumes.
 - Optional desktop priority for known games, running Steam games and selected applications; Codex yields without stopping local monitoring.
 - Settings that retain unsaved changes when you switch tabs. Saving one tab preserves changes already saved on another.
 - Background startup with Codex, optional tray visibility, and a hidden window that can always be reopened.
 - Five interface styles: Minimal, Soft, Rounded, Paper and Studio. Every style supports independent dark and light modes.
+- Three additional color themes: Slate, Forest and Dusk, each with dark and light variants and immediate previews.
+- Settings grouped into Appearance, Activity, Background and Advanced, with consistent navigation icons and dependent controls.
 - The original terminal dashboard, connection diagnostics, desktop shortcuts and local configuration tools.
 - The upstream engine's privacy controls, desktop identity handling and cost coverage reporting.
 
@@ -64,9 +67,9 @@ Use PowerShell 7, the .NET 8 SDK and the stable Rust toolchain with the Windows 
 ./scripts/package-desktop.ps1 -AppRoot "$PWD/.build/desktop"
 ```
 
-Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.5.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
+Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.6.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
 
-Version 1.5.0 passed 280 Rust tests and 90 desktop checks on both same-drive and cross-drive configurations. Checks cover both heading modes, idle timer pause/resume, game/custom process matching and priority transitions through a running engine. Native Windows checks exercised both heading toggles and previews with Ctrl+S; earlier 1.4.0 checks covered dropdown selection, tab changes and retained drafts. Priority policy tests use synthetic process names and do not launch games. These results describe the tested Windows 11 environment; see the [release checklist](docs/desktop-release.md) for coverage and limitations.
+Version 1.6.0 passed 284 Rust tests and 205 desktop checks in both same-drive and cross-drive configurations. Checks cover timed idle hiding and automatic restoration, manual-pause/priority preservation, live appearance previews, settings sections and edits made during asynchronous saves. All 40 style/theme/mode combinations are checked at 460-pixel width for layout and text/button contrast. Earlier native checks covered dropdown selection and both heading toggles. Tests use synthetic sessions and process names; no games are launched. These results describe the tested Windows 11 environment; see the [release checklist](docs/desktop-release.md) for limitations.
 
 The Rust engine and original terminal documentation remain available in [docs/index.md](docs/index.md), [CHANGELOG.md](CHANGELOG.md) and the source tree.
 

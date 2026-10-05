@@ -33,6 +33,7 @@ public sealed class Preferences
     public string PriorityApplications { get; set; } = "";
     public string InterfaceStyle { get; set; } = "minimal";
     public string ColorMode { get; set; } = "dark";
+    public string ColorTheme { get; set; } = "neutral";
 
     public bool SameMonitoring(Preferences other) => CodexHome == other.CodexHome && PollSeconds == other.PollSeconds && StaleSeconds == other.StaleSeconds && StickySeconds == other.StickySeconds && IncludeWsl == other.IncludeWsl && EfficiencyMode == other.EfficiencyMode && MonitorOnly == other.MonitorOnly;
 

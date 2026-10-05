@@ -10,6 +10,7 @@ public static class Appearance
     {
         if (preferences.InterfaceStyle is not ("minimal" or "soft" or "chatgpt" or "paper" or "studio")) preferences.InterfaceStyle = "minimal";
         if (preferences.ColorMode is not ("dark" or "light")) preferences.ColorMode = "dark";
+        if (preferences.ColorTheme is not ("neutral" or "slate" or "forest" or "dusk")) preferences.ColorTheme = "neutral";
         var light = preferences.ColorMode == "light";
         var colors = new (string Key, string Dark, string Light)[]
         {
@@ -21,9 +22,25 @@ public static class Appearance
             ("AccentPressed", "#BFBFBF", "#4A4A4A"), ("Selected", "#262626", "#E8E8E8"),
             ("Selection", "#4A4A4A", "#CBCBCB"), ("Scrollbar", "#505050", "#A0A0A0")
         };
-        foreach (var color in colors)
+        var darkPalette = preferences.ColorTheme switch
         {
-            var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? color.Light : color.Dark));
+            "slate" => new[] { "#0B1018", "#121A24", "#1A2533", "#25374B", "#35465D", "#F1F5FB", "#B9C5D6", "#A9CAFF", "#0D1726", "#CAE0FF", "#87B3F4", "#25374B", "#3A5676", "#60748E" },
+            "forest" => new[] { "#09130F", "#111F18", "#192B21", "#253B2C", "#365440", "#EAF6ED", "#B7CBBE", "#A8DDBA", "#0D2014", "#C2ECCF", "#86C89D", "#234733", "#3E6650", "#637F6A" },
+            "dusk" => new[] { "#140F19", "#211A27", "#2B2134", "#3B2C47", "#4F3D5E", "#F8EFFA", "#CFC0D4", "#D9B7EC", "#24172C", "#ECCFF8", "#BF93D9", "#3E2C4D", "#654670", "#866D93" },
+            _ => Array.Empty<string>()
+        };
+        var lightPalette = preferences.ColorTheme switch
+        {
+            "slate" => new[] { "#F3F6FB", "#FFFFFF", "#EDF1F8", "#E1E9F3", "#C9D4E4", "#172337", "#495B73", "#244B82", "#FFFFFF", "#1B3B69", "#153055", "#DCE8F8", "#C5D8F3", "#8498B2" },
+            "forest" => new[] { "#F3F7F3", "#FFFFFF", "#EDF3EE", "#DFE9E0", "#CAD8CC", "#193320", "#4D6654", "#2D6440", "#FFFFFF", "#245233", "#1C4329", "#DEECE0", "#C4DDCA", "#859D8B" },
+            "dusk" => new[] { "#F8F4FA", "#FFFFFF", "#F1EAF5", "#E8DDED", "#D8CADD", "#34233E", "#66526F", "#6B447F", "#FFFFFF", "#593767", "#482B54", "#EADCF3", "#D8C1E5", "#A28BAB" },
+            _ => Array.Empty<string>()
+        };
+        var palette = light ? lightPalette : darkPalette;
+        for (var index = 0; index < colors.Length; index++)
+        {
+            var color = colors[index];
+            var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Length == 0 ? light ? color.Light : color.Dark : palette[index]));
             brush.Freeze();
             window.Resources[color.Key] = brush;
         }
