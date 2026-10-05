@@ -18,7 +18,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 15;
+const CONFIG_SCHEMA_VERSION: u32 = 16;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -461,7 +461,9 @@ impl DesktopPresenceDesign {
 #[serde(default)]
 pub struct DisplayConfig {
     pub timer_mode: PresenceTimerMode,
+    pub pause_timer_when_idle: bool,
     pub separate_usage_line: bool,
+    pub activity_project_heading: bool,
     pub desktop_presence_design: DesktopPresenceDesign,
     pub large_image_key: String,
     pub large_text: String,
@@ -557,7 +559,9 @@ impl Default for DisplayConfig {
         Self {
             desktop_presence_design: DesktopPresenceDesign::CodexApp,
             timer_mode: PresenceTimerMode::Work,
+            pause_timer_when_idle: false,
             separate_usage_line: true,
+            activity_project_heading: false,
             large_image_key: "codex-logo".to_string(),
             large_text: "Codex".to_string(),
             desktop_large_image_key: "codex-app".to_string(),
@@ -1256,7 +1260,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 15);
+        assert_eq!(cfg.schema_version, 16);
         assert!(cfg.presence_enabled);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
@@ -1519,7 +1523,7 @@ mod tests {
         )
         .unwrap();
         config.normalize_for_runtime();
-        assert_eq!(config.schema_version, 15);
+        assert_eq!(config.schema_version, 16);
         assert!(!config.privacy.show_project_name);
         assert!(!config.privacy.show_model);
         assert!(config.privacy.show_subscription);
@@ -1527,6 +1531,9 @@ mod tests {
         assert_eq!(config.display.token_label, "TK");
         assert_eq!(config.display.context_label, "CTX");
         assert!(config.display.use_chat_title);
+        assert!(config.display.separate_usage_line);
+        assert!(!config.display.activity_project_heading);
+        assert!(!config.display.pause_timer_when_idle);
         config.display.custom_text = "  Multi\nline\ttext  ".into();
         config.normalize_for_runtime();
         assert_eq!(config.display.custom_text, "Multi line text");

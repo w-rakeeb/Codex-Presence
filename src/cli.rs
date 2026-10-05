@@ -19,6 +19,8 @@ pub enum Commands {
     DesktopBridge {
         #[arg(long)]
         observe: bool,
+        #[arg(long)]
+        priority_hold: bool,
     },
     ConfigGet,
     ConfigCheck,

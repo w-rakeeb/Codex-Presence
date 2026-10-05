@@ -16,6 +16,7 @@ $taskEvents = @(
     @{ type = 'session_meta'; timestamp = $taskNow; payload = @{ id = 'desktop-verification'; cwd = $taskRoot; originator = 'codex_work_desktop'; source = 'vscode' } },
     @{ type = 'turn_context'; timestamp = $taskNow; payload = @{ model = 'gpt-5.4'; effort = 'high'; service_tier = 'fast' } },
     @{ type = 'event_msg'; timestamp = $taskNow; payload = @{ type = 'task_started' } },
+    @{ type = 'response_item'; timestamp = $taskNow; payload = @{ type = 'function_call'; name = 'exec_command'; arguments = '{"cmd":"verify fixture"}'; call_id = 'fixture-command' } },
     @{ type = 'event_msg'; timestamp = $taskNow; payload = @{ type = 'token_count'; info = @{ total_token_usage = @{ input_tokens = 8000; cached_input_tokens = 2000; output_tokens = 1200; total_tokens = 9200 }; last_token_usage = @{ input_tokens = 8000; cached_input_tokens = 2000; output_tokens = 1200; total_tokens = 9200 }; model_context_window = 272000 }; rate_limits = @{ primary = @{ used_percent = 12; window_minutes = 300; resets_at = [DateTimeOffset]::UtcNow.AddHours(2).ToUnixTimeSeconds() }; secondary = @{ used_percent = 24; window_minutes = 10080; resets_at = [DateTimeOffset]::UtcNow.AddDays(3).ToUnixTimeSeconds() }; credits = @{ has_credits = $true; unlimited = $false; balance = '42.00' } } } }
 )
 $taskJsonl = ($taskEvents | ForEach-Object { ConvertTo-Json -InputObject $_ -Depth 20 -Compress }) -join "`n"

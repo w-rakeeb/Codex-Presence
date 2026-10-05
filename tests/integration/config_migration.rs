@@ -84,7 +84,7 @@ fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() 
     };
 
     assert!(runtime.reload_from_path(&path));
-    assert_eq!(runtime.schema_version, 15);
+    assert_eq!(runtime.schema_version, 16);
     assert!(runtime.presence_enabled);
     assert!(!runtime.privacy.show_git_branch);
     assert!(runtime.privacy.show_credits);
@@ -107,7 +107,7 @@ fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() 
     let persisted: serde_json::Value =
         serde_json::from_slice(&fs::read(path).expect("read migrated config"))
             .expect("parse migrated config");
-    assert_eq!(persisted["schema_version"], 15);
+    assert_eq!(persisted["schema_version"], 16);
     assert_eq!(persisted["presence_enabled"], true);
     assert_eq!(persisted["privacy"]["show_credits"], true);
 }

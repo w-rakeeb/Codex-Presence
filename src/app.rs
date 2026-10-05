@@ -751,14 +751,19 @@ pub fn run_desktop_bridge(
     mut config: PresenceConfig,
     runtime: RuntimeSettings,
     observe: bool,
+    priority_hold: bool,
 ) -> Result<()> {
     use std::io::{BufRead, Write};
 
     let stop = install_stop_signal()?;
     let input_stop = Arc::clone(&stop);
+    let priority = Arc::new(AtomicBool::new(priority_hold));
+    let input_priority = Arc::clone(&priority);
     thread::spawn(move || {
         for line in io::stdin().lock().lines() {
-            if line.map_or(true, |line| line.trim() == "quit") {
+            if line.map_or(true, |line| {
+                !apply_bridge_control(line.trim(), &input_priority)
+            }) {
                 break;
             }
         }
@@ -781,8 +786,25 @@ pub fn run_desktop_bridge(
             &mut metrics_tracker,
             &mut plan_detector,
         )?;
+        let priority_held = priority.load(Ordering::Relaxed);
         if !observe {
-            publish_runtime_snapshot(&mut discord, &snapshot, &config, PresenceSurface::Desktop);
+            if priority_held {
+                let mut publication = config.clone();
+                publication.presence_enabled = false;
+                publish_runtime_snapshot(
+                    &mut discord,
+                    &snapshot,
+                    &publication,
+                    PresenceSurface::Desktop,
+                );
+            } else {
+                publish_runtime_snapshot(
+                    &mut discord,
+                    &snapshot,
+                    &config,
+                    PresenceSurface::Desktop,
+                );
+            }
         }
         let active = snapshot.active_session();
         let surface = active
@@ -803,8 +825,10 @@ pub fn run_desktop_bridge(
         let value = serde_json::json!({
             "schema_version": 1,
             "snapshot_at": Utc::now(),
-            "discord_status": if observe { "Monitoring only" } else { discord.status() },
-            "presence_enabled": config.presence_enabled && !observe,
+            "discord_status": if priority_held { "Priority app active · Codex presence cleared" } else if observe { "Monitoring only" } else { discord.status() },
+            "presence_enabled": config.presence_enabled && !observe && !priority_held,
+            "priority_held": priority_held,
+            "timer_paused": crate::discord::timer_should_pause(active, &config),
             "plan": snapshot.resolved_plan.status_label(),
             "plan_details": snapshot.resolved_plan,
             "speed": snapshot.resolved_service_tier.fast_mode_label(),
@@ -842,12 +866,25 @@ pub fn run_desktop_bridge(
         output.flush()?;
         drop(output);
         let deadline = Instant::now() + runtime.poll_interval.max(Duration::from_millis(250));
-        while Instant::now() < deadline && !stop.load(Ordering::Relaxed) {
+        while Instant::now() < deadline
+            && !stop.load(Ordering::Relaxed)
+            && priority.load(Ordering::Relaxed) == priority_held
+        {
             thread::sleep(Duration::from_millis(100));
         }
     }
     discord.shutdown();
     Ok(())
+}
+
+fn apply_bridge_control(command: &str, priority: &AtomicBool) -> bool {
+    match command {
+        "yield" => priority.store(true, Ordering::Relaxed),
+        "resume" => priority.store(false, Ordering::Relaxed),
+        "quit" => return false,
+        _ => {}
+    }
+    true
 }
 
 fn maybe_relaunch_in_terminal() -> Result<bool> {
@@ -1627,5 +1664,17 @@ explorer.exe"#;
             surface_from_environment(vars),
             Some(PresenceSurface::Desktop)
         );
+    }
+
+    #[test]
+    fn bridge_priority_controls_yield_resume_and_quit_independently() {
+        let priority = AtomicBool::new(false);
+        assert!(apply_bridge_control("yield", &priority));
+        assert!(priority.load(Ordering::Relaxed));
+        assert!(apply_bridge_control("ignored", &priority));
+        assert!(priority.load(Ordering::Relaxed));
+        assert!(apply_bridge_control("resume", &priority));
+        assert!(!priority.load(Ordering::Relaxed));
+        assert!(!apply_bridge_control("quit", &priority));
     }
 }

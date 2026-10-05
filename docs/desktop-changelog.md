@@ -1,5 +1,17 @@
 # Desktop release notes
 
+## 1.5.0
+
+- Restored activity/project ahead of model text in the grouped layout.
+- Added an activity/project heading toggle. Off retains Codex App or ChatGPT App; on assigns activity/project, model/effort and token/context to the heading and two separate text fields.
+- Added coverage for both layouts, standard/Fast display, private fields, missing data and long Unicode chat titles. Desktop checks save and restore both heading modes.
+- Configuration schema 16 defaults the new toggle to off and retains existing visibility and label settings.
+- Added idle/waiting timer pause. The clock is hidden during inactivity; continuous time excludes that interval on resume.
+- Added desktop activity priority for known games, running Steam games and selected executable names. Codex publication yields temporarily while local monitoring continues; releasing priority preserves manual pause and the saved configuration.
+- Reserved usage text before optional quota fields so context values remain complete in both grouped layouts.
+
+Verified on Windows 11 x64: 280 Rust tests, 90 desktop checks in each drive configuration, and native heading-toggle/save/preview checks. Priority policy tests use synthetic game/process inputs and the real isolated bridge; no games were launched. Windows 10 execution remains unverified.
+
 ## 1.4.0
 
 - Corrected the dropdown popup template so mouse and keyboard selections work reliably.

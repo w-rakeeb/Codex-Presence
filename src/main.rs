@@ -46,7 +46,10 @@ fn run() -> Result<u8> {
     let config = PresenceConfig::load_or_init()?;
 
     match cli.command {
-        Some(Commands::DesktopBridge { observe }) => {
+        Some(Commands::DesktopBridge {
+            observe,
+            priority_hold,
+        }) => {
             let _guard = match process_guard::acquire_single_instance()? {
                 process_guard::AcquireState::Acquired(guard) => guard,
                 process_guard::AcquireState::AlreadyRunning { pid } => {
@@ -55,7 +58,7 @@ fn run() -> Result<u8> {
                     );
                 }
             };
-            app::run_desktop_bridge(config, config::runtime_settings(), observe)?;
+            app::run_desktop_bridge(config, config::runtime_settings(), observe, priority_hold)?;
             Ok(0)
         }
         Some(Commands::ConfigGet | Commands::ConfigCheck) => unreachable!(),

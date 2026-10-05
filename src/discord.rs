@@ -9,6 +9,7 @@ use std::process;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant, SystemTime};
 
+use codex_presence_core::presence::compose_presence_with_limits;
 use codex_presence_core::{
     CreditBalance, PresenceFieldId, PresenceValues, compose_presence, format_window_label,
     select_credits_global_first,
@@ -42,6 +43,9 @@ pub struct DiscordPresence {
     consecutive_errors: u32,
     idle_start_epoch: Option<i64>,
     continuous_start_epoch: i64,
+    timer_base_epoch: Option<i64>,
+    timer_idle_since: Option<i64>,
+    timer_idle_seconds: i64,
     paused: bool,
     #[cfg(test)]
     clear_attempts: u32,
@@ -110,7 +114,7 @@ pub struct DiscordProofAssertions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PresencePayload {
     session_id: Option<String>,
-    start_epoch: i64,
+    start_epoch: Option<i64>,
     activity_name: String,
     details: String,
     state: String,
@@ -141,6 +145,9 @@ impl DiscordPresence {
                 Utc::now().timestamp().max(0),
             ),
             paused: false,
+            timer_base_epoch: None,
+            timer_idle_since: None,
+            timer_idle_seconds: 0,
             #[cfg(test)]
             clear_attempts: 0,
             #[cfg(test)]
@@ -168,6 +175,30 @@ impl DiscordPresence {
         }
     }
 
+    fn timer_epoch_at(
+        &mut self,
+        session: Option<&CodexSessionSnapshot>,
+        config: &PresenceConfig,
+        now: i64,
+    ) -> Option<i64> {
+        let base = self.start_epoch(session, config);
+        if self.timer_base_epoch != Some(base) || !config.display.pause_timer_when_idle {
+            self.timer_base_epoch = Some(base);
+            self.timer_idle_since = None;
+            self.timer_idle_seconds = 0;
+        }
+        if timer_should_pause(session, config) {
+            self.timer_idle_since.get_or_insert(now);
+            return None;
+        }
+        if let Some(start) = self.timer_idle_since.take() {
+            self.timer_idle_seconds = self
+                .timer_idle_seconds
+                .saturating_add(now.saturating_sub(start).max(0));
+        }
+        Some(base.saturating_add(self.timer_idle_seconds).min(now))
+    }
+
     pub fn update(
         &mut self,
         active_session: Option<&CodexSessionSnapshot>,
@@ -179,6 +210,7 @@ impl DiscordPresence {
     ) -> Result<()> {
         self.surface = detect_surface(active_session, fallback_surface, self.last_known_surface);
         self.last_known_surface = self.surface;
+        let timer_epoch = self.timer_epoch_at(active_session, config, Utc::now().timestamp());
         if !self.apply_presence_enabled(config.presence_enabled)? {
             return Ok(());
         }
@@ -215,7 +247,7 @@ impl DiscordPresence {
                     resolved_service_tier,
                     config,
                 );
-                let start_epoch = self.start_epoch(Some(session), config);
+                let start_epoch = timer_epoch;
                 let payload = PresencePayload {
                     session_id: Some(session.session_id.clone()),
                     start_epoch,
@@ -277,7 +309,7 @@ impl DiscordPresence {
                 self.last_status = "Connected".to_string();
             }
             None => {
-                let idle_start = self.start_epoch(None, config);
+                let idle_start = timer_epoch;
                 let presentation = idle_presence_presentation(self.surface, config);
                 let payload = PresencePayload {
                     session_id: None,
@@ -372,11 +404,11 @@ impl DiscordPresence {
                     resolved_service_tier,
                     config,
                 ),
-                self.start_epoch(Some(session), config),
+                self.timer_epoch_at(Some(session), config, Utc::now().timestamp()),
             ),
             None => (
                 idle_presence_presentation(self.surface, config),
-                self.start_epoch(None, config),
+                self.timer_epoch_at(None, config, Utc::now().timestamp()),
             ),
         };
         let (resolved_large_key, resolved_small_key) = (
@@ -801,7 +833,15 @@ pub(crate) fn active_presence_presentation_with_credits(
         (Some(key), Some(text))
     };
     PresencePresentation {
-        app_name: branding.activity_name.to_string(),
+        app_name: if config.display.activity_project_heading
+            && config.display.separate_usage_line
+            && !config.privacy.enabled
+        {
+            activity_project_text(session, config)
+                .unwrap_or_else(|| branding.activity_name.to_string())
+        } else {
+            branding.activity_name.to_string()
+        },
         details,
         state,
         large_image_key: branding.large_image_key.to_string(),
@@ -849,7 +889,7 @@ struct ActivitySpec<'a> {
     name: &'a str,
     details: &'a str,
     state: &'a str,
-    start_epoch: i64,
+    start_epoch: Option<i64>,
     large_image_key: Option<&'a str>,
     large_text: Option<&'a str>,
     small_image_key: Option<&'a str>,
@@ -860,8 +900,10 @@ fn build_activity(spec: ActivitySpec<'_>) -> Activity<'_> {
     let mut activity = Activity::new()
         .name(spec.name)
         .details(spec.details)
-        .state(spec.state)
-        .timestamps(Timestamps::new().start(spec.start_epoch));
+        .state(spec.state);
+    if let Some(start) = spec.start_epoch {
+        activity = activity.timestamps(Timestamps::new().start(start));
+    }
 
     let mut assets = Assets::new();
     let mut has_assets = false;
@@ -1149,26 +1191,86 @@ fn presence_lines(
         for item in &mut layout.fields {
             if matches!(
                 item.field,
-                PresenceFieldId::Tokens | PresenceFieldId::Context
+                PresenceFieldId::Tokens
+                    | PresenceFieldId::Context
+                    | PresenceFieldId::Activity
+                    | PresenceFieldId::Project
             ) {
                 item.enabled = false;
             } else if matches!(item.field, PresenceFieldId::Model | PresenceFieldId::Cost) {
-                item.zone = codex_presence_core::PresenceZone::Details;
+                item.zone = if config.display.activity_project_heading {
+                    codex_presence_core::PresenceZone::Details
+                } else {
+                    codex_presence_core::PresenceZone::State
+                };
             }
         }
         layout
             .fields
             .sort_by_key(|item| item.field != PresenceFieldId::Model);
-        let lines = compose_presence(&layout, &values, fallback, "");
-        let state = if usage.is_empty() {
+        let mut extra_layout = layout.clone();
+        for item in &mut layout.fields {
+            if item.zone == codex_presence_core::PresenceZone::State
+                && !matches!(item.field, PresenceFieldId::Model | PresenceFieldId::Cost)
+            {
+                item.enabled = false;
+            }
+        }
+        for item in &mut extra_layout.fields {
+            if item.zone != codex_presence_core::PresenceZone::State
+                || matches!(item.field, PresenceFieldId::Model | PresenceFieldId::Cost)
+            {
+                item.enabled = false;
+            }
+        }
+        let usage_reserve = if usage.is_empty() {
+            0
+        } else {
+            usage.chars().count() + 3
+        };
+        let lines = compose_presence_with_limits(
+            &layout,
+            &values,
+            if config.display.activity_project_heading {
+                "Codex session"
+            } else {
+                ""
+            },
+            "",
+            128,
+            128usize.saturating_sub(usage_reserve),
+        );
+        let mut state = if usage.is_empty() {
             lines.state
         } else if lines.state.is_empty() {
             usage
         } else {
-            truncate_for_limit(&format!("{usage} • {}", lines.state), 128)
+            format!("{} • {usage}", lines.state)
+        };
+        let extra_budget =
+            128usize.saturating_sub(state.chars().count() + if state.is_empty() { 0 } else { 3 });
+        let extras =
+            compose_presence_with_limits(&extra_layout, &values, "", "", 128, extra_budget).state;
+        if !extras.is_empty() {
+            if !state.is_empty() {
+                state.push_str(" • ");
+            }
+            state.push_str(&extras);
+        }
+        let details = if config.display.activity_project_heading {
+            lines.details
+        } else {
+            let activity_project = activity_project_text(session, config)
+                .unwrap_or_else(|| "Coding session".to_string());
+            let extras = lines.details;
+            if extras.is_empty() {
+                activity_project
+            } else {
+                truncate_for_limit(&format!("{activity_project} · {extras}"), 128)
+            }
         };
         (
-            lines.details,
+            details,
             if state.is_empty() {
                 "Codex session".to_string()
             } else {
@@ -1179,6 +1281,50 @@ fn presence_lines(
         let lines = compose_presence(&layout, &values, fallback, "Codex session");
         (lines.details, lines.state)
     }
+}
+
+fn activity_project_text(
+    session: &CodexSessionSnapshot,
+    config: &PresenceConfig,
+) -> Option<String> {
+    if config.privacy.enabled {
+        return None;
+    }
+    let activity = config
+        .privacy
+        .show_activity
+        .then_some(session.activity.as_ref())
+        .flatten()
+        .map(|value| value.to_text(config.privacy.show_activity_target));
+    let project = config
+        .privacy
+        .show_project_name
+        .then_some(session.project_name.as_str());
+    match (activity, project) {
+        (Some(activity), Some(project)) => {
+            let activity = truncate_for_limit(&activity, 48);
+            let project = truncate_for_limit(project, 128usize.saturating_sub(activity.len() + 3));
+            Some(format!("{activity} - {project}"))
+        }
+        (Some(activity), None) => Some(truncate_for_limit(&activity, 128)),
+        (None, Some(project)) => Some(truncate_for_limit(project, 128)),
+        (None, None) => None,
+    }
+}
+
+pub(crate) fn timer_should_pause(
+    session: Option<&CodexSessionSnapshot>,
+    config: &PresenceConfig,
+) -> bool {
+    config.display.pause_timer_when_idle
+        && session.is_none_or(|value| {
+            value.activity.as_ref().is_some_and(|activity| {
+                matches!(
+                    activity.kind,
+                    SessionActivityKind::Idle | SessionActivityKind::WaitingInput
+                )
+            })
+        })
 }
 
 fn token_state_part(session: &CodexSessionSnapshot, label: &str) -> Option<String> {
@@ -1468,7 +1614,87 @@ mod tests {
     }
 
     #[test]
-    fn separate_usage_line_keeps_model_above_custom_labels_and_respects_privacy() {
+    fn continuous_idle_pause_excludes_idle_intervals_and_omits_the_clock() {
+        let mut config = PresenceConfig::default();
+        config.display.timer_mode = PresenceTimerMode::Continuous;
+        config.display.pause_timer_when_idle = true;
+        let mut presence = DiscordPresence::new(None);
+        presence.continuous_start_epoch = 100;
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: SessionActivityKind::Thinking,
+            ..Default::default()
+        });
+        assert_eq!(
+            presence.timer_epoch_at(Some(&session), &config, 120),
+            Some(100)
+        );
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::Idle;
+        assert_eq!(presence.timer_epoch_at(Some(&session), &config, 130), None);
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::WaitingInput;
+        assert_eq!(presence.timer_epoch_at(Some(&session), &config, 160), None);
+        let activity = build_activity(ActivitySpec {
+            name: "Codex App",
+            details: "Waiting for input",
+            state: "GPT-5.6 Sol",
+            start_epoch: None,
+            large_image_key: None,
+            large_text: None,
+            small_image_key: None,
+            small_text: None,
+        });
+        assert!(
+            serde_json::to_value(activity)
+                .unwrap()
+                .get("timestamps")
+                .is_none()
+        );
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::EditingFile;
+        assert_eq!(
+            presence.timer_epoch_at(Some(&session), &config, 190),
+            Some(160)
+        );
+        assert_eq!(
+            presence.timer_epoch_at(Some(&session), &config, 200),
+            Some(160)
+        );
+        config.display.pause_timer_when_idle = false;
+        assert_eq!(
+            presence.timer_epoch_at(Some(&session), &config, 210),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn work_timer_restarts_with_new_work_and_missing_sessions_pause() {
+        let mut config = PresenceConfig::default();
+        config.display.pause_timer_when_idle = true;
+        let mut presence = DiscordPresence::new(None);
+        let mut session = sample_session();
+        session.last_activity = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: SessionActivityKind::Thinking,
+            ..Default::default()
+        });
+        assert_eq!(
+            presence.timer_epoch_at(Some(&session), &config, 120),
+            Some(100)
+        );
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::WaitingInput;
+        assert_eq!(presence.timer_epoch_at(Some(&session), &config, 130), None);
+        session.last_activity = SystemTime::UNIX_EPOCH + Duration::from_secs(150);
+        session.activity.as_mut().unwrap().kind = SessionActivityKind::RunningCommand;
+        assert_eq!(
+            presence.timer_epoch_at(Some(&session), &config, 160),
+            Some(150)
+        );
+        assert_eq!(presence.timer_epoch_at(None, &config, 170), None);
+        session.activity = None;
+        assert!(!timer_should_pause(Some(&session), &config));
+    }
+
+    #[test]
+    fn grouped_usage_keeps_activity_project_before_model_and_respects_privacy() {
         for fast in [false, true] {
             let mut config = PresenceConfig::default();
             config.display.token_label = "Token".to_string();
@@ -1483,13 +1709,11 @@ mod tests {
                 &resolved_service_tier(fast),
                 &config,
             );
-            assert!(details.contains("GPT-5.6 Sol"), "{details}");
-            assert_eq!(details.contains('⚡'), fast);
-            assert!(!state.contains("GPT-"));
-            assert!(
-                state.starts_with("Token: 30.0K - Context: 6% used"),
-                "{state}"
-            );
+            assert!(details.contains("project-alpha"), "{details}");
+            assert!(!details.contains("GPT-"), "{details}");
+            assert!(state.starts_with("GPT-5.6 Sol"), "{state}");
+            assert_eq!(state.contains('⚡'), fast);
+            assert!(state.contains("Token: 30.0K - Context: 6% used"), "{state}");
             config.privacy.show_tokens = false;
             let (_, hidden_tokens) = presence_lines(
                 &session,
@@ -1500,7 +1724,7 @@ mod tests {
                 &config,
             );
             assert!(!hidden_tokens.contains("Token:"));
-            assert!(hidden_tokens.starts_with("Context:"));
+            assert!(hidden_tokens.contains("Context:"));
             config.privacy.enabled = true;
             let (_, private) = presence_lines(
                 &session,
@@ -1512,6 +1736,134 @@ mod tests {
             );
             assert_eq!(private, "In a coding session");
         }
+    }
+
+    #[test]
+    fn activity_project_heading_separates_rows_and_keeps_surface_branding() {
+        for surface in [
+            PresenceSurface::Cli,
+            PresenceSurface::VsCode,
+            PresenceSurface::Desktop,
+        ] {
+            for design in [
+                DesktopPresenceDesign::CodexApp,
+                DesktopPresenceDesign::ChatGptApp,
+            ] {
+                for fast in [false, true] {
+                    let mut config = PresenceConfig::default();
+                    config.display.activity_project_heading = true;
+                    config.display.desktop_presence_design = design;
+                    config.display.token_label = "Token".to_string();
+                    config.display.context_label = "Context".to_string();
+                    config.privacy.show_git_branch = false;
+                    config.privacy.show_subscription = false;
+                    config.privacy.show_cost = false;
+                    config.privacy.show_limits = false;
+                    config.privacy.show_credits = false;
+                    let mut session = sample_session();
+                    session.activity = Some(crate::session::SessionActivitySnapshot {
+                        kind: SessionActivityKind::Thinking,
+                        ..Default::default()
+                    });
+                    session.model = Some("gpt-5.6-sol".to_string());
+                    let presentation = active_presence_presentation(
+                        surface,
+                        &session,
+                        None,
+                        &resolved_plan_pro(),
+                        &resolved_service_tier(fast),
+                        &config,
+                    );
+                    assert_eq!(presentation.app_name, "Thinking - project-alpha");
+                    assert!(presentation.details.starts_with("GPT-5.6 Sol"));
+                    assert_eq!(presentation.details.contains('⚡'), fast);
+                    assert!(!presentation.details.contains("Thinking"));
+                    assert!(!presentation.details.contains("project-alpha"));
+                    assert_eq!(presentation.state, "Token: 30.0K - Context: 6% used");
+                    let branding = display_branding(surface, &config);
+                    assert_eq!(presentation.large_text, branding.large_text);
+                    assert_eq!(presentation.large_image_key, branding.large_image_key);
+                    let application_name = branding.activity_name.to_string();
+                    let activity = build_activity(ActivitySpec {
+                        name: &presentation.app_name,
+                        details: &presentation.details,
+                        state: &presentation.state,
+                        start_epoch: Some(100),
+                        large_image_key: Some(&presentation.large_image_key),
+                        large_text: Some(&presentation.large_text),
+                        small_image_key: None,
+                        small_text: None,
+                    });
+                    let payload = serde_json::to_value(activity).expect("activity");
+                    assert_eq!(payload["name"], "Thinking - project-alpha");
+                    assert_eq!(payload["details"], presentation.details);
+                    assert_eq!(payload["state"], presentation.state);
+                    config.display.activity_project_heading = false;
+                    let normal = active_presence_presentation(
+                        surface,
+                        &session,
+                        None,
+                        &resolved_plan_pro(),
+                        &resolved_service_tier(fast),
+                        &config,
+                    );
+                    assert_eq!(normal.app_name, application_name);
+                    assert_eq!(normal.details, "Thinking - project-alpha");
+                    assert!(normal.state.starts_with("GPT-5.6 Sol"));
+                    assert!(normal.state.contains(" • Token: 30.0K - Context: 6% used"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn activity_heading_respects_privacy_missing_data_and_long_chat_titles() {
+        let mut config = PresenceConfig::default();
+        config.display.activity_project_heading = true;
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: SessionActivityKind::RunningCommand,
+            target: Some("private-command".to_string()),
+            ..Default::default()
+        });
+        config.privacy.show_activity_target = false;
+        assert_eq!(
+            activity_project_text(&session, &config).as_deref(),
+            Some("Running command - project-alpha")
+        );
+        config.privacy.show_project_name = false;
+        assert_eq!(
+            activity_project_text(&session, &config).as_deref(),
+            Some("Running command")
+        );
+        config.privacy.show_activity = false;
+        assert_eq!(activity_project_text(&session, &config), None);
+        let private = active_presence_presentation(
+            PresenceSurface::Desktop,
+            &session,
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+        assert_eq!(private.app_name, "Codex App");
+        config.privacy.show_project_name = true;
+        session.project_name = "長いチャット名".repeat(40);
+        let heading = activity_project_text(&session, &config).expect("heading");
+        assert!(heading.len() <= 128);
+        config.privacy.enabled = true;
+        let private = active_presence_presentation(
+            PresenceSurface::Desktop,
+            &session,
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+        assert_eq!(private.app_name, "Codex App");
+        assert_eq!(private.details, "Using Codex");
+        assert_eq!(private.state, "In a coding session");
+        assert_eq!(private.small_image_key, None);
     }
     fn resolved_plan_pro() -> ResolvedPlan {
         ResolvedPlan {
@@ -1616,14 +1968,14 @@ mod tests {
     fn update_publishes_when_start_epoch_changes_even_if_text_same() {
         let old_payload = PresencePayload {
             session_id: Some("session-1".to_string()),
-            start_epoch: 100,
+            start_epoch: Some(100),
             activity_name: "Codex CLI".to_string(),
             details: "Editing src/main.rs".to_string(),
             state: "GPT-5.3-Codex".to_string(),
         };
         let new_payload = PresencePayload {
             session_id: Some("session-1".to_string()),
-            start_epoch: 120,
+            start_epoch: Some(120),
             activity_name: "Codex CLI".to_string(),
             details: "Editing src/main.rs".to_string(),
             state: "GPT-5.3-Codex".to_string(),
@@ -1639,7 +1991,7 @@ mod tests {
     fn update_republishes_same_payload_on_priority_heartbeat() {
         let payload = PresencePayload {
             session_id: Some("session-1".to_string()),
-            start_epoch: 100,
+            start_epoch: Some(100),
             activity_name: "Codex CLI".to_string(),
             details: "Editing src/main.rs".to_string(),
             state: "GPT-5.3-Codex".to_string(),
@@ -1659,7 +2011,7 @@ mod tests {
         let service_tier = resolved_service_tier(false);
         presence.last_sent = Some(PresencePayload {
             session_id: Some("session-1".to_string()),
-            start_epoch: 100,
+            start_epoch: Some(100),
             activity_name: "ChatGPT App".to_string(),
             details: "Editing".to_string(),
             state: "GPT-5.6 Sol".to_string(),
@@ -2227,7 +2579,7 @@ mod tests {
             name: "ChatGPT App",
             details: "Running command - project-alpha",
             state: "GPT-5.6 Sol · Max | Pro 20x ($200/month)",
-            start_epoch: 100,
+            start_epoch: Some(100),
             large_image_key: Some("chatgpt-logo"),
             large_text: Some("ChatGPT App"),
             small_image_key: None,

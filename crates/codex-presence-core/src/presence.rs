@@ -238,6 +238,17 @@ pub fn compose_presence(
     details_fallback: &str,
     state_fallback: &str,
 ) -> PresenceLines {
+    compose_presence_with_limits(layout, values, details_fallback, state_fallback, 128, 128)
+}
+
+pub fn compose_presence_with_limits(
+    layout: &PresenceLayoutConfig,
+    values: &PresenceValues,
+    details_fallback: &str,
+    state_fallback: &str,
+    details_limit: usize,
+    state_limit: usize,
+) -> PresenceLines {
     let mut details = Vec::new();
     let mut state = Vec::new();
     let mut details_cost = None;
@@ -266,8 +277,14 @@ pub fn compose_presence(
         }
     }
     PresenceLines {
-        details: compact_join(&details, details_fallback, " · ", 128, details_cost),
-        state: compact_join(&state, state_fallback, " • ", 128, state_cost),
+        details: compact_join(
+            &details,
+            details_fallback,
+            " · ",
+            details_limit,
+            details_cost,
+        ),
+        state: compact_join(&state, state_fallback, " • ", state_limit, state_cost),
     }
 }
 
@@ -310,7 +327,7 @@ fn compact_join(
             .and_then(|priority| parts.get(priority))
             .map_or(0, |value| value.chars().count() + separator.chars().count());
         let available = limit.saturating_sub(reserved);
-        let part = if accepted.is_empty() && reserved > 0 {
+        let part = if accepted.is_empty() {
             truncate_chars(part, available)
         } else {
             part.clone()

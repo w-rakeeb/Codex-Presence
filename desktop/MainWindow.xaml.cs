@@ -59,6 +59,8 @@ public partial class MainWindow : Window
     private Button? overviewBackground;
     private int overviewBuilds;
     private readonly DispatcherTimer hostTimer;
+    private readonly DispatcherTimer priorityTimer;
+    private bool checkingPriority;
     private bool hostWasRunning;
     private bool startedByHost;
     private bool checkingHost;
@@ -92,6 +94,8 @@ public partial class MainWindow : Window
         };
         hostTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         hostTimer.Tick += (_, _) => { if (!busy && !checkingHost && !dirty && backend.Options.StartWithChatGpt && !testMode) _ = ObserveHost(); };
+        priorityTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        priorityTimer.Tick += (_, _) => { if (!busy && !checkingPriority && !testMode && backend.Running) _ = ObservePriority(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) everShown = true; else refreshTimer.Stop(); };
         foreach (var name in new[] { "Overview", "Privacy", "Layout", "Settings", "Tools" })
         {
@@ -453,13 +457,14 @@ public partial class MainWindow : Window
         SaveBar();
     }
 
-    private void EditBoolean(Panel panel, JsonObject parent, string key, string label)
+    private CheckBox EditBoolean(Panel panel, JsonObject parent, string key, string label)
     {
         var checkbox = new CheckBox { Content = Text(label, 12), IsChecked = B(parent[key]) };
         AutomationProperties.SetName(checkbox, label);
         checkbox.Checked += (_, _) => { parent[key] = true; dirty = true; };
         checkbox.Unchecked += (_, _) => { parent[key] = false; dirty = true; };
         panel.Children.Add(checkbox);
+        return checkbox;
     }
 
     private void EditChoice(Panel panel, JsonObject parent, string key, string label, string[] values)
@@ -492,13 +497,18 @@ public partial class MainWindow : Window
 
     private void RenderLayout()
     {
-        Heading("Presence layout", "Choose the application, labels and field order for Discord's two text lines.");
+        Heading("Presence layout", "Choose the heading, labels and visible fields.");
         if (draft == null) return;
         var display = draft["display"]!.AsObject();
         EditChoice(Card("DESKTOP IDENTITY"), display, "desktop_presence_design", "Discord application", new[] { "codex_app", "chat_gpt_app" });
         var layout = display["presence_layout"]!.AsObject();
         EditChoice(Card("LABEL STYLE"), layout, "label_style", "Field labels", new[] { "compact", "descriptive" });
-        EditBoolean(Card("USAGE LINE"), display, "separate_usage_line", "Tokens and context on a separate line");
+        var textLayout = Card("DISCORD TEXT", "Keep the app heading, or use activity/project for three separate rows. Discord controls wrapping.");
+        var groupedText = EditBoolean(textLayout, display, "separate_usage_line", "Group model, tokens and context");
+        var activityTitle = EditBoolean(textLayout, display, "activity_project_heading", "Activity/project heading (three rows)");
+        activityTitle.IsEnabled = groupedText.IsChecked == true;
+        groupedText.Checked += (_, _) => activityTitle.IsEnabled = true;
+        groupedText.Unchecked += (_, _) => activityTitle.IsEnabled = false;
         var labels = Card("CUSTOM LABELS", "Chat titles use the latest local rename. Folder names are used when a title is unavailable.");
         EditBoolean(labels, display, "use_chat_title", "Use the chat title for the project field");
         EditText(labels, display, "token_label", "Token label", maximum: 16);
@@ -567,7 +577,13 @@ public partial class MainWindow : Window
         var appearance = Card("APPEARANCE");
         EditChoice(appearance, preferenceCopy, "InterfaceStyle", "Interface style", new[] { "minimal", "soft", "chatgpt", "paper", "studio" });
         EditChoice(appearance, preferenceCopy, "ColorMode", "Color mode", new[] { "dark", "light" });
-        EditChoice(Card("ELAPSED TIME"), draft["display"]!.AsObject(), "timer_mode", "Presence timer", new[] { "continuous", "work" });
+        var elapsed = Card("ELAPSED TIME", "Idle pause hides the clock while waiting or idle. Continuous time resumes without counting that idle interval.");
+        EditChoice(elapsed, draft["display"]!.AsObject(), "timer_mode", "Presence timer", new[] { "continuous", "work" });
+        EditBoolean(elapsed, draft["display"]!.AsObject(), "pause_timer_when_idle", "Pause timer while idle or waiting");
+        var priority = Card("ACTIVITY PRIORITY", "Clear Codex presence while a detected game or selected app runs. Restore it afterward. Local monitoring continues.");
+        EditBoolean(priority, preferenceCopy, "PreferOtherApps", "Give games and selected apps priority");
+        EditBoolean(priority, preferenceCopy, "DetectSteamGames", "Detect running Steam games");
+        EditText(priority, preferenceCopy, "PriorityApplications", "Other app executables (comma-separated)", maximum: 1024);
         var planCard = Card("PLAN");
         var plan = draft["openai_plan"]!.AsObject();
         EditChoice(planCard, plan, "mode", "Detection", new[] { "auto", "manual" });
@@ -655,7 +671,7 @@ public partial class MainWindow : Window
         {
             var button = ActionButton(pair.Item1, () => OpenPath(pair.Item2)); button.Margin = new Thickness(0, 4, 0, 4); docs.Children.Add(button);
         }
-        Row(docs, "Desktop app", "1.4.0 · Windows x64"); Row(docs, "Presence engine", "Based on xt0n1-t3ch / Codex Discord Rich Presence 1.11.2");
+        Row(docs, "Desktop app", "1.5.0 · Windows x64"); Row(docs, "Presence engine", "Based on xt0n1-t3ch / Codex Discord Rich Presence 1.11.2");
         docs.Children.Add(Text("MIT licensed · original engine attribution and license included.", 11, Muted));
     }
 
@@ -670,6 +686,7 @@ public partial class MainWindow : Window
         Footer.Text = "Starting presence…";
         await backend.LoadConfig();
         await backend.SaveConfig(backend.Config!.DeepClone().AsObject());
+        if (!testMode) await backend.SetPriorityHold(await Task.Run(() => PriorityMonitor.Find(backend.Options)) != null);
         await backend.Start();
         Footer.Text = backend.Options.MonitorOnly ? "Monitoring locally · Discord publication is off." : S(backend.Snapshot?["discord_status"], "Connecting to Discord…");
         if (page == "Overview") RenderOverview();
@@ -703,6 +720,20 @@ public partial class MainWindow : Window
     {
         tray.Visible = !backend.Options.HideTrayIcon;
         if (backend.Options.StartWithChatGpt && !testMode) hostTimer.Start(); else hostTimer.Stop();
+        if (backend.Options.PreferOtherApps && !testMode) priorityTimer.Start(); else { priorityTimer.Stop(); _ = backend.SetPriorityHold(false); }
+    }
+
+    private async Task ObservePriority()
+    {
+        checkingPriority = true;
+        try
+        {
+            var preferences = backend.Options;
+            var match = await Task.Run(() => PriorityMonitor.Find(preferences));
+            if (!closing && backend.Running && ReferenceEquals(preferences, backend.Options)) await backend.SetPriorityHold(match != null);
+        }
+        catch (Exception error) { Footer.Text = "Priority check: " + error.Message; }
+        finally { checkingPriority = false; }
     }
 
     private async Task CheckHost()
@@ -789,6 +820,7 @@ public partial class MainWindow : Window
         closing = true;
         refreshTimer.Stop();
         hostTimer.Stop();
+        priorityTimer.Stop();
         tray.Dispose();
         Close();
         Application.Current.Shutdown();
@@ -901,17 +933,52 @@ public partial class MainWindow : Window
         await SaveDraft();
         Check(S(backend.Config?["display"]?["timer_mode"]) == "continuous" && S(backend.Config?["display"]?["token_label"]) == "Token", "Saving a retained draft preserves changes already saved on another tab");
         Navigate("Layout"); UpdateLayout();
-        var separateUsage = Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Tokens and context on a separate line"); separateUsage.IsChecked = true;
+        var separateUsage = Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Group model, tokens and context"); separateUsage.IsChecked = true;
         await SaveDraft();
         Check(B(backend.Config?["display"]?["separate_usage_line"]), "The separate usage line preference saves through the runtime");
+        var activityHeading = Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Activity/project heading (three rows)"); activityHeading.IsChecked = true;
+        await SaveDraft();
+        Check(B(backend.Config?["display"]?["activity_project_heading"]), "Activity/project heading can be enabled and saved");
+        for (var attempt = 0; attempt < 30 && !S(backend.Snapshot?["preview"]?["app_name"]).EndsWith(" - Verification chat title", StringComparison.Ordinal); attempt++) await Task.Delay(100);
+        File.WriteAllText(Path.Combine(evidence, "heading-on.json"), backend.Snapshot!.ToJsonString(Backend.JsonOptions));
+        Check(S(backend.Snapshot?["preview"]?["app_name"]).EndsWith(" - Verification chat title", StringComparison.Ordinal) && S(backend.Snapshot?["preview"]?["details"]).StartsWith("GPT-", StringComparison.Ordinal) && S(backend.Snapshot?["preview"]?["state"]).StartsWith("Token:", StringComparison.Ordinal), "Parsed sessions produce three distinct text groups with the activity heading");
+        Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Activity/project heading (three rows)").IsChecked = false;
+        await SaveDraft();
+        Check(!B(backend.Config?["display"]?["activity_project_heading"]), "Application heading can be restored and saved");
+        var selectedApplication = S(backend.Config?["display"]?["desktop_presence_design"]) == "chat_gpt_app" ? "ChatGPT App" : "Codex App";
+        for (var attempt = 0; attempt < 30 && S(backend.Snapshot?["preview"]?["app_name"]) != selectedApplication; attempt++) await Task.Delay(100);
+        File.WriteAllText(Path.Combine(evidence, "heading-off.json"), backend.Snapshot!.ToJsonString(Backend.JsonOptions));
+        Check(S(backend.Snapshot?["preview"]?["app_name"]) == selectedApplication && S(backend.Snapshot?["preview"]?["details"]).Contains(" - Verification chat title", StringComparison.Ordinal) && S(backend.Snapshot?["preview"]?["state"]).StartsWith("GPT-", StringComparison.Ordinal) && S(backend.Snapshot?["preview"]?["state"]).Contains("Token:", StringComparison.Ordinal), "Parsed sessions keep activity before model and usage with the application heading");
         Navigate("Settings"); UpdateLayout();
         var engineBeforeAppearance = backend.ProcessId;
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Interface style").SelectedValue = "soft";
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Color mode").SelectedValue = "light";
+        Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Give games and selected apps priority").IsChecked = true;
+        Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Detect running Steam games").IsChecked = false;
+        Elements<TextBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Other app executables (comma-separated)").Text = "Spotify.exe";
         await SaveDraft();
         var savedAppearance = Preferences.Load(Path.Combine(root, "Data", "Verification", "Preferences"));
         Check(savedAppearance.InterfaceStyle == "soft" && savedAppearance.ColorMode == "light", "Interface style and color mode persist independently");
+        Check(savedAppearance.PreferOtherApps && !savedAppearance.DetectSteamGames && savedAppearance.PriorityApplications == "Spotify.exe", "Game and custom application priority preferences persist independently");
         Check(backend.ProcessId == engineBeforeAppearance && backend.Running, "Saving appearance retains the active presence engine and connection");
+        Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Pause timer while idle or waiting").IsChecked = true;
+        await SaveDraft();
+        Check(B(backend.Config?["display"]?["pause_timer_when_idle"]), "Idle timer pause can be enabled and saved");
+        Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Pause timer while idle or waiting").IsChecked = false;
+        await SaveDraft();
+        Check(!B(backend.Config?["display"]?["pause_timer_when_idle"]), "Continuous idle timing can be restored and saved");
+        Check(PriorityMonitor.Match(new[] { "FortniteClient-Win64-Shipping" }, "", false) != null, "Known game processes receive priority");
+        Check(PriorityMonitor.Match(new[] { "spotify", "Minecraft.Windows" }, @"C:\Apps\Spotify.EXE", false) == "spotify" && PriorityMonitor.Match(new[] { "Minecraft.Windows" }, "Minecraft.Windows", false) != null, "Custom executables match paths, casing and dotted process names");
+        Check(PriorityMonitor.Match(new[] { "steam", "EpicGamesLauncher", "Discord", "Codex" }, "", false) == null, "Launchers and ordinary host applications do not suppress presence");
+        Check(PriorityMonitor.Match(new[] { "steam" }, "", true) == "Steam game", "An active Steam game marker receives priority");
+        var configBeforePriority = File.ReadAllText(backend.ConfigPath); var engineBeforePriority = backend.ProcessId;
+        await backend.SetPriorityHold(true);
+        for (var attempt = 0; attempt < 30 && !B(backend.Snapshot?["priority_held"]); attempt++) await Task.Delay(100);
+        Check(B(backend.Snapshot?["priority_held"]) && backend.Running, "Priority hold pauses publication while session monitoring continues");
+        await backend.SetPriorityHold(false);
+        for (var attempt = 0; attempt < 30 && B(backend.Snapshot?["priority_held"]); attempt++) await Task.Delay(100);
+        Check(!B(backend.Snapshot?["priority_held"]) && backend.Running, "Priority release restores the same running desktop engine");
+        Check(File.ReadAllText(backend.ConfigPath) == configBeforePriority && backend.ProcessId == engineBeforePriority, "Priority transitions preserve saved publication settings and engine identity");
         var pollBox = Elements<TextBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Poll interval (seconds)");
         pollBox.Text = "0";
         var beforeValidation = File.ReadAllText(backend.ConfigPath);

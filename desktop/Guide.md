@@ -40,13 +40,23 @@ Choose **Codex App** or **ChatGPT App** desktop identity. Authoritative session 
 
 Enable each of the eleven fields, choose **details** (first Discord line) or **state** (second line), and use the arrows to reorder them. Field visibility stays synchronized with Privacy. The compositor fits Discord's text limits; some fields may be omitted when the lines are full. Save to apply on the next poll.
 
-**Tokens and context on a separate line** puts model/work information above a line such as `Token: 29.5M - Context: 85% used`. Token/context labels remain editable. This mode assigns the model and enabled cost to details and reserves the beginning of state for usage; enabled quota/credit fields can follow. Turn it off to use the fully custom inline field order. Discord provides two custom text fields and controls wrapping, so the app cannot force a third custom line or its typography.
+Keep **Group model, tokens and context** enabled for the structured layouts. **Activity/project heading (three rows)** switches between two arrangements:
+
+- **Off (default):** Codex App or ChatGPT App remains the heading. The first text field shows `Thinking - Chat title`; the second shows model/effort followed by `Token: 29.5M - Context: 85% used`. Discord wraps that lower field as space permits.
+- **On:** `Thinking - Chat title` becomes the heading, model/effort occupies the first text field and token/context occupies the second. The original application ID, artwork and image tooltip stay unchanged.
+
+Both arrangements respect visibility switches and custom labels. Privacy mode restores the normal application heading and hides work details. Long chat titles are fitted separately from model and usage text. Enabled cost, custom text or quota fields may add content to their configured group. Turn grouped layout off for the original fully custom field order; the activity/project heading toggle then has no effect. Discord controls wrapping and typography and cannot provide three custom text fields beneath an additional app heading.
 
 ## Settings
 
 - **Interface style:** Minimal uses compact outlined cards. Soft uses serif headings and rounder controls. Rounded uses pill controls and borderless cards. Paper uses Cambria headings, ruled sections and a page icon. Studio uses sans-serif headings, outlined rounded cards and a grid icon. All five change typography, spacing, boxes or icons independently of color.
 - **Color mode:** Dark or Light, independent of the interface style. Choose both and click **Save changes**. Appearance changes preserve the active engine and Discord connection.
 - **Presence timer:** Continuous counts from when this companion app opened and continues through edits, project switches, pauses, reconnects and engine restarts inside the same app session. Closing/reopening the companion begins a new timer. Work / project uses the current session's last activity time and resets with new work. The selection updates without restarting the engine. The terminal launcher receives the same continuous start time when launched from this app.
+- **Pause timer while idle or waiting:** hides the Discord clock when there is no active session, or its observed activity is Idle or Waiting for input. On resuming work, Continuous excludes the observed idle interval; Work / project uses the new work timestamp. Discord has no frozen elapsed-clock display, so the clock is removed while paused. Unknown activity is not assumed idle. Initially off.
+- **Give games and selected apps priority:** temporarily clears this desktop engine's Discord activity while a matching application runs. Session monitoring, metrics and the engine continue. It restores publication after the priority app closes, while respecting your existing manual Pause setting. Initially off. Checks run locally in a background task every three seconds; priority transitions wake the engine's poll loop.
+- **Detect running Steam games:** uses Steam's local running-app marker when Steam is running; availability depends on the Steam client. Known game executable names are also recognized. Launchers alone do not pause Codex.
+- **Other app executables:** add comma-separated executable names, such as `Spotify.exe, MyGame.exe`. Executable paths and case differences are accepted. A selected process receives priority for its entire running lifetime, even if minimized; this does not inspect whether it is actively publishing another Discord presence. For an unrecognized game, add its executable here. Discord chooses which remaining activity to display; this app cannot reorder another application's presence.
+
 - **Plan:** automatic detection or manual selection: Free, Go, Plus, Pro 5x, Pro 20x, Business, Enterprise or Edu. **Show plan price** hides/shows the price; **Show subscription in Discord** hides/shows the entire plan name in Discord. Local monitoring still displays it.
 - **Codex home:** absolute folder containing Codex sessions. Changing it saves your current configuration in the old home, switches to the new home and loads that home's settings; it does not move sessions or copy credentials.
 - **Poll interval:** 1–60 seconds, default 1 for new preferences. Existing preferences are preserved. A shorter interval detects changes sooner.
@@ -83,6 +93,8 @@ Click **Save changes** or press **Ctrl+S**. Monitoring changes restart the owned
 
 Use **Ctrl+Tab / Ctrl+Shift+Tab** to change tabs, **Ctrl+1–5** to select one directly, and the usual arrow keys, typing and Enter inside dropdowns.
 
+Activity priority applies to the desktop engine. The original terminal interface manages its own publication. Timer and privacy settings remain shared. Process names and the Steam marker stay local and are not sent to Discord.
+
 ## Tools
 
 **Doctor** checks setup and Discord connectivity. **Status** reads a one-time session/operational report. Both show actual output, including failures. The output area also holds recent engine errors. **Complete configuration** gives access to every original engine configuration field, including pricing maps and future-compatible JSON fields supported by this engine version. **Save changes** validates through the Rust engine before writing.
@@ -116,7 +128,7 @@ Stop the desktop engine before manually starting `terminal-view`; it rejects dup
 
 If another application edits the shared configuration, saving is rejected to preserve its edits. Click Reload, reapply your choices, and save. To restore a backup, exit the app first, copy the desired backup over `discord-presence-config.json`, and reopen. Do not replace Codex authentication files.
 
-Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Schema upgrades are backed up before engine startup; unchanged settings do not create extra backups. Version 1.4 uses schema 15. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
+Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Schema upgrades are backed up before engine startup; unchanged settings do not create extra backups. Version 1.5.0 uses schema 16. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
 
 ## Troubleshooting
 
@@ -139,7 +151,7 @@ Requires the pinned Rust toolchain, Visual Studio C++ Build Tools with Windows S
 .\scripts\verify-desktop.ps1 -CrossVolume
 ```
 
-The default build output is `.build/desktop` inside the repository. Pass an absolute `-OutputDirectory` to stage elsewhere; pass `-AppRoot` to verify that output. Desktop verification uses synthetic sessions with publication disabled. Each run checks 76 behaviors, including retained drafts, cross-tab merges, timer and usage settings, appearance without engine restart, all ten style/mode combinations, a real terminal launch/recovery, shortcut creation and background operation. Real startup registry entries are not changed. Cross-volume verification uses Windows TEMP on a different drive. Results and previews are under the chosen app root's `Data/Verification`. See `docs/desktop-release.md` for packaging and publication.
+The default build output is `.build/desktop` inside the repository. Pass an absolute `-OutputDirectory` to stage elsewhere; pass `-AppRoot` to verify that output. Desktop verification uses synthetic sessions with publication disabled. Each run checks 90 behaviors, including both heading toggles and parsed preview text, retained drafts, cross-tab merges, timer and usage settings, appearance without engine restart, all ten style/mode combinations, a real terminal launch/recovery, shortcut creation and background operation. Real startup registry entries are not changed. Cross-volume verification uses Windows TEMP on a different drive. Results and previews are under the chosen app root's `Data/Verification`. See `docs/desktop-release.md` for packaging and publication.
 
 ## Remove
 

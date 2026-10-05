@@ -28,6 +28,9 @@ public sealed class Preferences
     public bool MonitorOnly { get; set; }
     public bool HideTrayIcon { get; set; }
     public bool StartWithChatGpt { get; set; }
+    public bool PreferOtherApps { get; set; }
+    public bool DetectSteamGames { get; set; } = true;
+    public string PriorityApplications { get; set; } = "";
     public string InterfaceStyle { get; set; } = "minimal";
     public string ColorMode { get; set; } = "dark";
 
@@ -71,6 +74,7 @@ public sealed class Backend
     public event Action<string>? Logged;
     public event Action? Exited;
     public string? LastError { get; private set; }
+    public bool PriorityHeld { get; private set; }
     private readonly long applicationStartEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private Process? process;
     private JsonObject? snapshot;
@@ -180,7 +184,7 @@ public sealed class Backend
         if (completion != null) await completion;
         process?.Dispose();
         process = null;
-        var child = new Process { StartInfo = CreateStartInfo("desktop-bridge" + (Options.MonitorOnly ? " --observe" : "")), EnableRaisingEvents = true };
+        var child = new Process { StartInfo = CreateStartInfo("desktop-bridge" + (Options.MonitorOnly ? " --observe" : "") + (PriorityHeld ? " --priority-hold" : "")), EnableRaisingEvents = true };
         Volatile.Write(ref snapshot, null);
         LastError = null;
         var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -192,6 +196,19 @@ public sealed class Backend
         completion = CompleteProcess(child, snapshots, errors, ready);
         try { await ready.Task.WaitAsync(TimeSpan.FromSeconds(30)); }
         catch (TimeoutException) { throw new IOException("The engine is still scanning sessions. Check Tools for progress, or stop it and try again."); }
+    }
+
+    public async Task SetPriorityHold(bool held)
+    {
+        if (PriorityHeld == held) return;
+        var child = process;
+        if (child == null || child.HasExited) { PriorityHeld = held; return; }
+        try { await child.StandardInput.WriteLineAsync(held ? "yield" : "resume"); await child.StandardInput.FlushAsync(); PriorityHeld = held; }
+        catch (Exception error) when (error is IOException or InvalidOperationException)
+        {
+            LastError = error.Message;
+            Logged?.Invoke("Priority control: " + error.Message);
+        }
     }
 
     private async Task ReadSnapshots(Process child, TaskCompletionSource<bool> ready)

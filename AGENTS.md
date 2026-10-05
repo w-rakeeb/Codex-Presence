@@ -6,7 +6,7 @@ This repo ships a Rust Discord Rich Presence runtime for Codex. Work from source
 
 | Area | Contract |
 |:---|:---|
-| Discord title | Must be `Codex CLI`, `Codex VS Code Extension`, or the selected desktop design: `Codex App` / `ChatGPT App` |
+| Discord title | Default: `Codex CLI`, `Codex VS Code Extension`, or the selected desktop design: `Codex App` / `ChatGPT App`. An explicitly selected activity/project heading may replace its displayed title; application identity and assets stay unchanged. |
 | Identity policy | Only Codex app names, Codex app IDs, and Codex/OpenAI assets may publish |
 | Runtime data | Read local Codex session JSONL and global state only |
 | Privacy | No telemetry or cloud storage; only the configured Discord Rich Presence fields leave the machine |

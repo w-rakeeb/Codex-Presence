@@ -18,15 +18,18 @@ The release is tested on Windows 11 x64. It uses Windows 10 compatible controls,
 ## Features
 
 - Chat titles, activity, model, effort, tokens, context and available usage information from local Codex sessions.
-- A separate usage line below the model, such as `Token: 29.5M - Context: 85% used`, with custom labels and visibility controls.
+- Activity/project first, followed by model/effort and grouped `Token: 29.5M - Context: 85% used` text, with custom labels and visibility controls.
+- An optional activity/project heading for three independent text groups; the normal Codex App or ChatGPT App heading remains the default.
 - Continuous elapsed time since the companion opens, or elapsed time based on work and project activity.
+- Optional idle/waiting timer pause, with idle intervals excluded from continuous elapsed time.
+- Optional desktop priority for known games, running Steam games and selected applications; Codex yields without stopping local monitoring.
 - Settings that retain unsaved changes when you switch tabs. Saving one tab preserves changes already saved on another.
 - Background startup with Codex, optional tray visibility, and a hidden window that can always be reopened.
 - Five interface styles: Minimal, Soft, Rounded, Paper and Studio. Every style supports independent dark and light modes.
 - The original terminal dashboard, connection diagnostics, desktop shortcuts and local configuration tools.
 - The upstream engine's privacy controls, desktop identity handling and cost coverage reporting.
 
-Discord provides two custom text fields. The separate usage option puts model information in the first and token/context information in the second; Discord controls wrapping. This app reads Codex session files. It does not inspect browser chats or parse ordinary ChatGPT conversations.
+Discord provides a heading and two text fields. With the normal app heading, activity/project occupies the first field and model followed by usage occupies the second. Turn on **Activity/project heading (three rows)** in Layout to use the heading for activity/project, the first field for model/effort and the second for usage. Keep **Group model, tokens and context** enabled for either layout. Discord controls wrapping; three custom rows underneath a retained app heading cannot be forced. This app reads Codex session files. It does not inspect browser chats or parse ordinary ChatGPT conversations.
 
 ## Controls
 
@@ -61,9 +64,9 @@ Use PowerShell 7, the .NET 8 SDK and the stable Rust toolchain with the Windows 
 ./scripts/package-desktop.ps1 -AppRoot "$PWD/.build/desktop"
 ```
 
-Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.4.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
+Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.5.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
 
-Version 1.4.0 passed 275 Rust tests and 76 desktop checks on both same-drive and cross-drive configurations. Native Windows interaction checks covered opening and selecting a dropdown, changing tabs with a pending draft, restoring that draft and saving with Ctrl+S. These results describe the tested Windows 11 environment; see the [release checklist](docs/desktop-release.md) for coverage and limitations.
+Version 1.5.0 passed 280 Rust tests and 90 desktop checks on both same-drive and cross-drive configurations. Checks cover both heading modes, idle timer pause/resume, game/custom process matching and priority transitions through a running engine. Native Windows checks exercised both heading toggles and previews with Ctrl+S; earlier 1.4.0 checks covered dropdown selection, tab changes and retained drafts. Priority policy tests use synthetic process names and do not launch games. These results describe the tested Windows 11 environment; see the [release checklist](docs/desktop-release.md) for coverage and limitations.
 
 The Rust engine and original terminal documentation remain available in [docs/index.md](docs/index.md), [CHANGELOG.md](CHANGELOG.md) and the source tree.
 
