@@ -230,6 +230,8 @@ struct CachedSessionEntry {
     accumulator: SessionAccumulator,
     snapshot: Option<CodexSessionSnapshot>,
     partial_line_buffer: String,
+    head: Vec<u8>,
+    tail: Vec<u8>,
 }
 
 impl CachedSessionEntry {
@@ -241,6 +243,8 @@ impl CachedSessionEntry {
             accumulator: SessionAccumulator::default(),
             snapshot: None,
             partial_line_buffer: String::new(),
+            head: Vec::new(),
+            tail: Vec::new(),
         }
     }
 
@@ -251,6 +255,8 @@ impl CachedSessionEntry {
         self.accumulator = SessionAccumulator::default();
         self.snapshot = None;
         self.partial_line_buffer.clear();
+        self.head.clear();
+        self.tail.clear();
     }
 }
 
@@ -1945,5 +1951,62 @@ mod tests {
         assert_eq!(snapshot2.session_total_tokens, Some(160));
         assert_eq!(snapshot2.last_turn_tokens, Some(60));
         assert_eq!(snapshot2.session_delta_tokens, Some(60));
+    }
+
+    #[test]
+    fn cached_parser_refreshes_same_length_and_growing_rewrites() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("rewrite.jsonl");
+        let payload = |tokens, stamp| {
+            let meta = serde_json::json!({"type": "session_meta", "timestamp": stamp, "payload": {"id": "rewrite", "cwd": "."}});
+            let event = serde_json::json!({"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"total_tokens": tokens}}}});
+            format!("{meta}\n{event}\n")
+        };
+        let mut git = GitBranchCache::new(Duration::from_secs(30));
+        let mut cache = SessionParseCache::default();
+        for (tokens, stamp) in [
+            (100, "2026-10-05T00:00:00Z"),
+            (200, "2026-10-05T00:00:01Z"),
+            (30000, "2026-10-05T00:00:02Z"),
+        ] {
+            std::fs::write(&path, payload(tokens, stamp)).expect("write rewrite");
+            let metadata = std::fs::metadata(&path).expect("metadata");
+            let snapshot = parse_session_file_cached(
+                &path,
+                &metadata,
+                SystemTime::now(),
+                &mut git,
+                &mut cache,
+                &PricingConfig::default(),
+            )
+            .expect("parse")
+            .expect("snapshot");
+            assert_eq!(snapshot.session_total_tokens, Some(tokens));
+        }
+    }
+
+    #[test]
+    fn cached_parser_detects_growing_rewrite_with_unchanged_header() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("rewrite-tail.jsonl");
+        let meta = serde_json::json!({"type": "session_meta", "payload": {"id": "rewrite", "cwd": ".", "padding": "x".repeat(2048)}});
+        let mut git = GitBranchCache::new(Duration::from_secs(30));
+        let mut cache = SessionParseCache::default();
+        for tokens in [100, 50000] {
+            let event = serde_json::json!({"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"total_tokens": tokens}}}});
+            std::fs::write(&path, format!("{meta}\n{event}\n")).expect("write");
+            let metadata = std::fs::metadata(&path).expect("metadata");
+            let snapshot = parse_session_file_cached(
+                &path,
+                &metadata,
+                SystemTime::now(),
+                &mut git,
+                &mut cache,
+                &PricingConfig::default(),
+            )
+            .expect("parse")
+            .expect("snapshot");
+            assert_eq!(snapshot.session_total_tokens, Some(tokens));
+        }
     }
 }

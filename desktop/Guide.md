@@ -38,7 +38,7 @@ Choose **Codex App** or **ChatGPT App** desktop identity. Authoritative session 
 
 **Use the chat title for the project field** reads the latest name/title from the local Codex thread database, including renames, with the session index as a fallback. Missing titles fall back to the folder name. Disable this option to display folder names. The database is opened read-only, and title changes are checked with each session poll.
 
-Enable each of the eleven fields, choose **details** (first Discord line) or **state** (second line), and use the arrows to reorder them. Field visibility stays synchronized with Privacy. The compositor fits Discord's text limits; some fields may be omitted when the lines are full. Save to apply on the next poll.
+Enable each of the eleven fields and use the arrows to reorder them. When grouped layout is off, choose **Details** (first Discord line) or **State** (second line). Grouped layout assigns rows automatically, so these selectors are disabled. Field visibility stays synchronized with Privacy. The compositor fits Discord's text limits; some fields may be omitted when the lines are full. Save to apply on the next poll.
 
 Keep **Group model, tokens and context** enabled for the structured layouts. **Activity/project heading (three rows)** switches between two arrangements:
 
@@ -93,7 +93,7 @@ Use the **Appearance**, **Activity**, **Background** and **Advanced** section bu
 }
 ```
 
-Click **Save changes** or press **Ctrl+S**. Monitoring changes restart the owned engine if it was running; appearance, timer, tray and startup preferences keep it running. Values are validated first. Unsaved edits stay on their tabs and do not block navigation; **Reload** discards the current tab's edits. Save or reload all edited tabs before Exit. Closing to the background keeps drafts in memory; they are not silently written to disk.
+Click **Save changes** or press **Ctrl+S**. Monitoring changes restart the owned engine if it was running; appearance, timer, tray and startup preferences keep it running. Invalid numbers, paths and JSON are revealed with inline feedback and keyboard focus. Pending requests disable repeat submissions while navigation stays available. Unsaved edits stay on their tabs; **Reload** asks before discarding the current tab's edits and preserves edits made while loading. Exit offers **Review changes**, **Exit without saving**, and **Cancel**. Closing to the background keeps drafts in memory; they are not silently written to disk.
 
 Use **Ctrl+Tab / Ctrl+Shift+Tab** to change tabs, **Ctrl+1–5** to select one directly, and the usual arrow keys, typing and Enter inside dropdowns.
 
@@ -132,7 +132,7 @@ Stop the desktop engine before manually starting `terminal-view`; it rejects dup
 
 If another application edits the shared configuration, saving is rejected to preserve its edits. Click Reload, reapply your choices, and save. To restore a backup, exit the app first, copy the desired backup over `discord-presence-config.json`, and reopen. Do not replace Codex authentication files.
 
-Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Schema upgrades are backed up before engine startup; unchanged settings do not create extra backups. Version 1.6.0 uses schema 17. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
+Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Desktop preferences also use atomic replacement and exact backups under `Data/Backups/Preferences`. Damaged desktop preferences open with safe defaults and a warning, preserving the original file. Unchanged settings do not create extra backups. Version 1.7.0 uses schema 17. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
 
 ## Troubleshooting
 

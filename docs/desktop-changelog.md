@@ -1,5 +1,19 @@
 # Desktop release notes
 
+## 1.7.0
+
+- Kept navigation available during requests while disabling duplicate asynchronous actions. Save, Reload and diagnostics retain the correct originating view when tabs change.
+- Fixed Reload retaining unsaved controls when the saved configuration was unchanged. Edits made after a reload starts remain intact.
+- Added inline validation for monitoring values, home folders, pricing JSON and complete configuration JSON, with focus and accessible error feedback.
+- Added safe recovery from damaged desktop preferences, atomic preference saves and exact backups. Failed preference saves preserve the previous monitoring settings and engine.
+- Added a visible Review / Exit without saving / Cancel decision for unsaved drafts, including hidden windows. Fixed the actual X-button close-event timing.
+- Adapted navigation, settings sections and field-order rows down to 320 logical pixels. Wide content is capped for readability; short windows keep scrolling and save controls.
+- Repaired scrollbar rail commands, added named window controls and maximization, keyboard focus indicators and polite status announcements. Long status messages remain bounded with full tooltips.
+- Fixed the documentation button in portable packages, command timeout recovery and malformed quota reset handling.
+- Fixed cached session parsing after equal-length and growing rewrites, while preserving append and split-line handling. Bridge control messages now wake a waiting poll directly, reducing timer wakeups.
+
+Verified on Windows 11 x64: 286 Rust tests, formatting and strict lint checks; 308 desktop checks in each drive configuration. All pages and Settings sections pass horizontal bounds checks at 320, 375, 390, 430, 768, 1024, 1280, 1440 and 1920 logical pixels. Forty appearance combinations pass text/button contrast and compact layout checks. See [audit coverage](desktop-audit.md) for native interaction evidence and remaining limits. Schema 17, application identities and existing defaults are preserved.
+
 ## 1.6.0
 
 - Changed the Discord context suffix to **Used**.

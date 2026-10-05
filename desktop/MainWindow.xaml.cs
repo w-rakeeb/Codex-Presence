@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private string page = "Overview";
     private bool closing;
     private bool busy;
+    private bool initialized;
+    private string? startupWarning;
     private bool hasDraftChanges;
     private string settingsSection = "Appearance";
     private readonly Dictionary<string, long> editVersions = new();
@@ -79,7 +81,7 @@ public partial class MainWindow : Window
         args = arguments;
         testMode = args.Contains("--self-test") || args.Contains("--test-home");
         InitializeComponent();
-        var options = testMode ? new Preferences() : Preferences.Load(root);
+        var options = testMode ? new Preferences() : Preferences.Load(root, out startupWarning);
         if (testMode)
         {
             var index = Array.IndexOf(args, "--test-home");
@@ -89,6 +91,7 @@ public partial class MainWindow : Window
         }
         backend = new Backend(root, options, testMode);
         Appearance.Apply(this, options);
+        SizeChanged += (_, _) => UpdateResponsiveLayout();
         refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         refreshTimer.Tick += (_, _) =>
         {
@@ -145,6 +148,11 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         PreviewKeyDown += (_, e) =>
         {
+            if (DecisionPanel.Visibility == Visibility.Visible)
+            {
+                if (e.Key == Key.Escape) { CloseDecision(); e.Handled = true; }
+                return;
+            }
             if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
             if (e.Key == Key.S && SaveHost.Visibility == Visibility.Visible) { e.Handled = true; _ = Guard(() => SaveDraft()); }
             else if (e.Key == Key.Tab)
@@ -156,9 +164,12 @@ public partial class MainWindow : Window
         };
     }
 
-    public Task InitializeApp() => Guard(async () =>
+    public Task InitializeApp() => Guard(InitializeContent);
+
+    private async Task InitializeContent()
     {
         await backend.LoadConfig();
+        initialized = true;
         Navigate("Overview");
         ApplyDesktopPreferences();
         if (args.Contains("--watch")) { Hide(); await CheckHost(); }
@@ -171,18 +182,21 @@ public partial class MainWindow : Window
             await StartEngine(); Title = "Codex Presence — Verification"; Navigate("Settings");
         }
         if (args.Contains("--verify-live") || args.Contains("--verify-background")) await VerifyLive();
-    });
+        if (startupWarning != null) { Footer.Text = startupWarning; ShowDashboard(); }
+    }
 
     private async Task Guard(Func<Task> action)
     {
         if (busy) { Footer.Text = "Finishing the current action…"; return; }
         busy = true;
-        UpdateOverviewControls();
+        UpdateActionAvailability();
         try { await action(); }
         catch (Exception error)
         {
             Footer.Text = error.Message;
             logs.Add(error.Message);
+            if (!initialized && !args.Contains("--self-test")) RenderStartupFailure(error.Message);
+            else if (!IsVisible && !args.Contains("--self-test")) ShowDashboard();
             if (args.Contains("--self-test"))
             {
                 Directory.CreateDirectory(Path.Combine(root, "Data", "Verification"));
@@ -195,7 +209,7 @@ public partial class MainWindow : Window
                 Application.Current.Shutdown(1);
             }
         }
-        finally { busy = false; UpdateOverviewControls(); ResumeTerminalMonitoring(); }
+        finally { busy = false; UpdateActionAvailability(); ResumeTerminalMonitoring(); }
     }
 
     private void Navigate(string target)
@@ -223,8 +237,9 @@ public partial class MainWindow : Window
         draftBase = backend.Config?.DeepClone().AsObject();
         foreach (var item in navigation)
         {
-            item.Value.Background = item.Key == page ? (Brush)FindResource("Selected") : Brushes.Transparent;
-            item.Value.Foreground = item.Key == page ? Accent : Muted;
+            item.Value.IsEnabled = initialized;
+            item.Value.SetResourceReference(BackgroundProperty, item.Key == page ? "Selected" : "Canvas");
+            item.Value.SetResourceReference(ForegroundProperty, item.Key == page ? "Accent" : "Muted");
             item.Value.BorderThickness = new Thickness(0);
         }
         if (editors.TryGetValue(page, out var retained) && (retained.Dirty || JsonNode.DeepEquals(retained.Base, backend.Config)))
@@ -232,11 +247,14 @@ public partial class MainWindow : Window
             draft = retained.Draft; draftBase = retained.Base;
             foreach (var element in retained.Content) PageBody.Children.Add(element);
             collectValues.AddRange(retained.Collect); saveAdditional = retained.Additional; previewAppearance = retained.Preview;
+            diagnostics = Elements<TextBox>(PageBody).FirstOrDefault(box => AutomationProperties.GetName(box) == "Diagnostics output");
             SaveHost.Child = retained.Save; SaveHost.Visibility = retained.Save == null ? Visibility.Collapsed : Visibility.Visible;
             dirty = retained.Dirty;
             PageScroll.ScrollToVerticalOffset(retained.Offset);
             if (dirty) Footer.Text = "Unsaved changes on this tab.";
             RecordInteractiveState();
+            UpdateResponsiveLayout();
+            UpdateActionAvailability();
             return;
         }
         switch (page)
@@ -249,6 +267,8 @@ public partial class MainWindow : Window
         }
         PageScroll.ScrollToTop();
         RecordInteractiveState();
+        UpdateResponsiveLayout();
+        UpdateActionAvailability();
     }
 
     private void RecordInteractiveState()
@@ -291,11 +311,17 @@ public partial class MainWindow : Window
     {
         var button = new Button { Content = title };
         AutomationProperties.SetName(button, title);
-        button.Click += (_, _) => action();
+        button.Click += (_, _) => { try { action(); } catch (Exception error) { Footer.Text = error.Message; logs.Add(error.Message); } };
         return button;
     }
 
-    private Button AsyncButton(string title, Func<Task> action) => ActionButton(title, () => _ = Guard(action));
+    private Button AsyncButton(string title, Func<Task> action)
+    {
+        var button = ActionButton(title, () => _ = Guard(action));
+        button.Tag = "AsyncAction";
+        button.IsEnabled = !busy;
+        return button;
+    }
 
     private static StackPanel NavigationContent(string name, Button button)
     {
@@ -495,7 +521,7 @@ public partial class MainWindow : Window
     private string ResetTime(JsonNode? value)
     {
         if (value == null) return "Unavailable";
-        if (value is JsonValue number && number.TryGetValue<long>(out var unix)) return DateTimeOffset.FromUnixTimeSeconds(unix).ToLocalTime().ToString("MMM d, HH:mm");
+        if (value is JsonValue number && number.TryGetValue<long>(out var unix)) return unix is >= -62135596800 and <= 253402300799 ? DateTimeOffset.FromUnixTimeSeconds(unix).ToLocalTime().ToString("MMM d, HH:mm") : "Unavailable";
         return DateTimeOffset.TryParse(S(value), out var date) ? date.ToLocalTime().ToString("MMM d, HH:mm") : S(value);
     }
 
@@ -551,13 +577,14 @@ public partial class MainWindow : Window
         "codex_app" => "Codex App", "chat_gpt_app" => "ChatGPT App", "pro_5x" => "Pro 5x", "pro_20x" => "Pro 20x", "auto" => "Automatic", "ascii" => "ASCII", "minimal" => "Minimal", "soft" => "Soft", "chatgpt" => "Rounded", "work" => "Work / project", "continuous" => "Continuous since app opens", "neutral" => "Neutral · black and white", "slate" => "Slate · cool blue", "forest" => "Forest · muted green", "dusk" => "Dusk · warm purple", _ => Label(value)
     };
 
-    private void EditText(Panel panel, JsonObject parent, string key, string label, bool optional = false, int maximum = 0)
+    private TextBox EditText(Panel panel, JsonObject parent, string key, string label, bool optional = false, int maximum = 0)
     {
         var holder = new StackPanel { Margin = new Thickness(0, 7, 0, 7) }; holder.Children.Add(Text(label, 11, Muted));
         var box = new TextBox { Text = S(parent[key], ""), ToolTip = S(parent[key], ""), MaxLength = maximum, Margin = new Thickness(0, 6, 0, 0) };
         AutomationProperties.SetName(box, label);
         box.TextChanged += (_, _) => { parent[key] = optional && string.IsNullOrWhiteSpace(box.Text) ? null : JsonValue.Create(box.Text); MarkDirty(); };
         holder.Children.Add(box); panel.Children.Add(holder);
+        return box;
     }
 
     private void RenderLayout()
@@ -580,7 +607,7 @@ public partial class MainWindow : Window
         EditText(labels, display, "token_label", "Token label", maximum: 16);
         EditText(labels, display, "context_label", "Context label", maximum: 16);
         EditText(labels, display, "custom_text", "Custom text", maximum: 128);
-        var fieldsCard = Card("FIELD ORDER", "Details is the first text field; state is the second. Grouped layout keeps activity, model and usage in their assigned groups.");
+        var fieldsCard = Card("FIELD ORDER", "Reorder fields within their groups. Turn off grouped layout to also choose the Details or State row.");
         var fields = layout["fields"]!.AsArray();
         var list = new StackPanel(); fieldsCard.Children.Add(list);
         void RenderFields()
@@ -590,21 +617,25 @@ public partial class MainWindow : Window
             {
                 var index = i;
                 var field = fields[i]!.AsObject();
-                var row = new Grid { Margin = new Thickness(0, 5, 0, 5) };
+                var row = new Grid { Margin = new Thickness(0, 5, 0, 5), Tag = "LayoutField" };
                 foreach (var width in new[] { new GridLength(1, GridUnitType.Star), new GridLength(104), new GridLength(35), new GridLength(35) }) row.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
                 var enabled = new CheckBox { Content = S(field["field"]) switch { "project" => "Chat title", "custom" => "Custom text", _ => Label(S(field["field"])) }, IsChecked = B(field["enabled"]) };
+                AutomationProperties.SetName(enabled, enabled.Content.ToString());
                 void SetVisibility(bool visible) { field["enabled"] = visible; draft["privacy"]![PrivacyKey(S(field["field"]))] = visible; MarkDirty(); }
                 enabled.Checked += (_, _) => SetVisibility(true);
                 enabled.Unchecked += (_, _) => SetVisibility(false); row.Children.Add(enabled);
-                var zone = new ComboBox { ItemsSource = new[] { "details", "state" }, SelectedItem = S(field["zone"]), Margin = new Thickness(0, 0, 6, 0), FontSize = 13 };
-                zone.SelectionChanged += (_, _) => { field["zone"] = zone.SelectedItem?.ToString(); MarkDirty(); }; Grid.SetColumn(zone, 1); row.Children.Add(zone);
+                var zone = new ComboBox { ItemsSource = new[] { new Choice("details", "Details"), new Choice("state", "State") }, DisplayMemberPath = "Title", SelectedValuePath = "Key", SelectedValue = S(field["zone"]), Margin = new Thickness(0, 0, 6, 0), FontSize = 13, IsEnabled = groupedText.IsChecked != true, ToolTip = "Turn off grouped layout to choose the text row." };
+                zone.SelectionChanged += (_, _) => { field["zone"] = zone.SelectedValue?.ToString(); MarkDirty(); }; Grid.SetColumn(zone, 1); row.Children.Add(zone);
                 AutomationProperties.SetName(zone, Label(S(field["field"])) + " text field");
                 var up = ActionButton("↑", () => { var item = fields[index]; fields.RemoveAt(index); fields.Insert(index - 1, item); MarkDirty(); RenderFields(); }); up.Padding = new Thickness(0); up.IsEnabled = i > 0; up.Margin = new Thickness(0, 0, 4, 0); up.ToolTip = "Move " + Label(S(field["field"])) + " up"; AutomationProperties.SetName(up, up.ToolTip.ToString()); Grid.SetColumn(up, 2); row.Children.Add(up);
                 var down = ActionButton("↓", () => { var item = fields[index]; fields.RemoveAt(index); fields.Insert(index + 1, item); MarkDirty(); RenderFields(); }); down.Padding = new Thickness(0); down.IsEnabled = i < fields.Count - 1; down.ToolTip = "Move " + Label(S(field["field"])) + " down"; AutomationProperties.SetName(down, down.ToolTip.ToString()); Grid.SetColumn(down, 3); row.Children.Add(down);
                 list.Children.Add(row);
             }
+            UpdateResponsiveLayout();
         }
         RenderFields();
+        groupedText.Checked += (_, _) => { foreach (var zone in Elements<ComboBox>(list)) zone.IsEnabled = false; };
+        groupedText.Unchecked += (_, _) => { foreach (var zone in Elements<ComboBox>(list)) zone.IsEnabled = true; };
         SaveBar();
     }
 
@@ -619,13 +650,14 @@ public partial class MainWindow : Window
         var row = new WrapPanel();
         var save = AsyncButton("Save changes", () => SaveDraft(additional));
         save.Style = (Style)FindResource("PrimaryButton"); save.Margin = new Thickness(0, 0, 8, 0); row.Children.Add(save);
-        var reload = AsyncButton("Reload", async () => { await backend.LoadConfig(); dirty = false; editors.Remove(page); if (page == "Settings") Appearance.Apply(this, backend.Options); Navigate(page); Footer.Text = "Settings reloaded."; }); row.Children.Add(reload);
+        var reload = AsyncButton("Reload", () => ReloadDraft()); reload.ToolTip = "Discard this tab's unsaved changes and reload saved settings."; row.Children.Add(reload);
         SaveHost.Child = row;
         SaveHost.Visibility = Visibility.Visible;
     }
 
     private async Task SaveDraft(Func<Task>? additional = null)
     {
+        Footer.Text = "Saving " + page.ToLowerInvariant() + "…";
         additional ??= saveAdditional;
         var savingPage = page;
         var savingPreview = previewAppearance;
@@ -642,7 +674,7 @@ public partial class MainWindow : Window
         else
         {
             editors.Remove(savingPage);
-            if (page == savingPage) { dirty = false; Navigate(page); }
+            if (page == savingPage) { dirty = false; draft = null; draftBase = null; Navigate(page); }
         }
         UpdateDraftMarkers();
         Footer.Text = savingPage + " saved." + (dirty || editors.Values.Any(editor => editor.Dirty) ? " Unsaved edits remain." : "");
@@ -678,10 +710,11 @@ public partial class MainWindow : Window
         idleMinutes.TextChanged += (_, _) => MarkDirty();
         idleEnabled.Checked += (_, _) => idleMinutes.IsEnabled = true; idleEnabled.Unchecked += (_, _) => idleMinutes.IsEnabled = false;
         idle.Children.Add(idleMinutes);
+        AttachFieldFeedback(idleMinutes);
         collectValues.Add(() =>
         {
             if (idleEnabled.IsChecked != true) { display["idle_timeout_minutes"] = 0; return; }
-            if (!int.TryParse(idleMinutes.Text, out var minutes) || minutes < 1 || minutes > 1440) { ShowSettingsSection("Activity"); throw new InvalidOperationException("Choose an idle timeout between 1 and 1440 minutes."); }
+            if (!int.TryParse(idleMinutes.Text, out var minutes) || minutes < 1 || minutes > 1440) RejectField(idleMinutes, "Choose an idle timeout between 1 and 1440 minutes.", "Activity");
             display["idle_timeout_minutes"] = minutes;
         });
         var elapsed = SettingsCard("Activity", "ELAPSED TIME", "Continuous keeps counting across edits. Work / project resets with new activity.");
@@ -708,14 +741,16 @@ public partial class MainWindow : Window
         EditBoolean(window, preferenceCopy, "HideTrayIcon", "Hide the system tray icon");
         window.Children.Add(Text("Reopen Codex Presence to return. Choose Exit to stop the app and its engine.", 13, Muted));
         var application = SettingsCard("Advanced", "MONITORING", "Change these only when needed. Saving monitoring preferences restarts the engine.");
-        EditText(application, preferenceCopy, "CodexHome", "Codex home folder");
+        var homeFolder = EditText(application, preferenceCopy, "CodexHome", "Codex home folder", maximum: 2048);
+        AttachFieldFeedback(homeFolder);
         foreach (var pair in new[] { ("PollSeconds", "Poll interval (seconds)", 1, 60), ("StaleSeconds", "Stale session cutoff (seconds)", 1, 86400), ("StickySeconds", "Keep active session (seconds)", 60, 86400) })
         {
             var box = new TextBox { Text = S(preferenceCopy[pair.Item1]), Margin = new Thickness(0, 6, 0, 12) };
             AutomationProperties.SetName(box, pair.Item2);
             application.Children.Add(Text(pair.Item2, 11, Muted)); application.Children.Add(box);
             box.TextChanged += (_, _) => MarkDirty();
-            collectValues.Add(() => { if (!int.TryParse(box.Text, out var number) || number < pair.Item3 || number > pair.Item4) { ShowSettingsSection("Advanced"); throw new InvalidOperationException(pair.Item2 + " must be between " + pair.Item3 + " and " + pair.Item4 + "."); } preferenceCopy[pair.Item1] = number; });
+            AttachFieldFeedback(box);
+            collectValues.Add(() => { if (!int.TryParse(box.Text, out var number) || number < pair.Item3 || number > pair.Item4) RejectField(box, pair.Item2 + " must be between " + pair.Item3 + " and " + pair.Item4 + ".", "Advanced"); preferenceCopy[pair.Item1] = number; });
         }
         foreach (var pair in new[] { ("MonitorOnly", "Monitor locally without publishing to Discord"), ("IncludeWsl", "Include WSL sessions"), ("EfficiencyMode", "Windows Efficiency mode for the engine") }) EditBoolean(application, preferenceCopy, pair.Item1, pair.Item2);
         var branding = new StackPanel();
@@ -728,8 +763,10 @@ public partial class MainWindow : Window
         var pricing = SettingsCard("Advanced", "PRICING", "Override rates per million tokens and model aliases. Save validates the complete configuration before replacing it.");
         var pricingEditor = new TextBox { Text = draft["pricing"]!.ToJsonString(Backend.JsonOptions), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, MinHeight = 100, MaxHeight = 250, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         pricingEditor.TextChanged += (_, _) => MarkDirty();
-        pricing.Children.Add(new Expander { Header = "Pricing aliases & overrides (JSON)", Content = pricingEditor });
-        collectValues.Add(() => draft["pricing"] = JsonNode.Parse(pricingEditor.Text)?.AsObject() ?? throw new InvalidOperationException("Pricing must be a JSON object."));
+        var pricingBody = new StackPanel(); pricingBody.Children.Add(pricingEditor); AttachFieldFeedback(pricingEditor);
+        var pricingExpander = new Expander { Header = "Pricing aliases & overrides (JSON)", Content = pricingBody }; pricing.Children.Add(pricingExpander);
+        AutomationProperties.SetName(pricingEditor, "Pricing JSON");
+        collectValues.Add(() => { try { draft["pricing"] = JsonNode.Parse(pricingEditor.Text)?.AsObject() ?? throw new JsonException(); } catch (Exception error) when (error is JsonException or InvalidOperationException) { pricingExpander.IsExpanded = true; RejectField(pricingEditor, "Enter a valid pricing JSON object.", "Advanced"); } });
         var identity = SettingsCard("Advanced", "ENGINE INFORMATION", "Application IDs and assets are maintained by the original engine.");
         Row(identity, "Schema", S(draft["schema_version"]));
         Row(identity, "Default application", S(draft["discord_client_id"]));
@@ -739,22 +776,17 @@ public partial class MainWindow : Window
         collectValues.Add(() =>
         {
             pending = preferenceCopy.Deserialize<Preferences>()!;
-            if (string.IsNullOrWhiteSpace(pending.CodexHome) || !Path.IsPathFullyQualified(pending.CodexHome)) throw new InvalidOperationException("Choose an absolute Codex home folder path.");
+            try
+            {
+                if (string.IsNullOrWhiteSpace(pending.CodexHome) || !Path.IsPathFullyQualified(pending.CodexHome)) throw new ArgumentException();
+                pending.CodexHome = Path.GetFullPath(pending.CodexHome);
+            }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException) { RejectField(homeFolder, "Enter a valid absolute Codex home folder path.", "Advanced"); }
+            if (!string.Equals(pending.CodexHome, backend.Options.CodexHome, StringComparison.OrdinalIgnoreCase) && editors.Any(pair => pair.Key != "Settings" && pair.Value.Dirty)) RejectField(homeFolder, "Save or reload your other edited tabs before changing the Codex home folder.", "Advanced");
             if (!string.Equals(Path.GetFullPath(pending.CodexHome), Path.GetFullPath(backend.Options.CodexHome), StringComparison.OrdinalIgnoreCase) && dirty)
                 Footer.Text = "Switching Codex home; reload its presence settings after saving.";
         });
-        SaveBar(async () =>
-        {
-            var restart = backend.Running && !backend.Options.SameMonitoring(pending!);
-            if (restart) await backend.Stop();
-            backend.Options = pending!;
-            Appearance.Apply(this, backend.Options);
-            ApplyDesktopPreferences();
-            if (!testMode) pending!.ApplyStartup();
-            pending!.Save(testMode ? Path.Combine(root, "Data", "Verification", "Preferences") : root);
-            await backend.LoadConfig();
-            if (restart) await backend.Start();
-        });
+        SaveBar(() => ApplyPreferences(pending!));
         ShowSettingsSection(settingsSection, false);
     }
 
@@ -762,37 +794,38 @@ public partial class MainWindow : Window
     {
         Heading("Tools", "Diagnostics, terminal and files.");
         var tools = Card("DIAGNOSTICS");
+        var output = new TextBox { Text = string.Join(Environment.NewLine, logs), IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, Height = 180, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        AutomationProperties.SetName(output, "Diagnostics output");
         var actions = new WrapPanel();
         foreach (var command in new[] { "doctor", "status" })
         {
-            var button = AsyncButton(Label(command), async () =>
-            {
-                Footer.Text = "Running " + command + "…";
-                try { diagnostics!.Text = await backend.Command(command); Footer.Text = "Diagnostics finished."; }
-                catch (Exception error) { diagnostics!.Text = error.Message; Footer.Text = "Diagnostics found an issue."; }
-            }); button.Margin = new Thickness(0, 0, 8, 8); actions.Children.Add(button);
+            var button = AsyncButton(Label(command), () => RunDiagnostic(command, output)); button.Margin = new Thickness(0, 0, 8, 8); actions.Children.Add(button);
         }
         tools.Children.Add(actions);
         var terminal = AsyncButton("Open original terminal", OpenTerminal); terminal.Margin = new Thickness(0, 0, 0, 10); tools.Children.Add(terminal);
         var shortcut = ActionButton("Create desktop shortcut", () => { var path = DesktopShortcut.Create(root); Footer.Text = "Desktop shortcut created."; logs.Add(path); }); shortcut.Margin = new Thickness(0, 0, 0, 10); tools.Children.Add(shortcut);
-        diagnostics = new TextBox { Text = string.Join(Environment.NewLine, logs), IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, Height = 180, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        diagnostics = output;
         tools.Children.Add(diagnostics);
         var advanced = Card("COMPLETE CONFIGURATION", "All engine fields are available here. External edits are detected before saving. Previous files are backed up under Data / Backups.");
         var raw = new TextBox { Text = draft?.ToJsonString(Backend.JsonOptions) ?? "{}", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, Height = 230, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        raw.TextChanged += (_, _) => MarkDirty(); advanced.Children.Add(new Expander { Header = "Advanced JSON editor", Content = raw });
-        collectValues.Add(() => draft = JsonNode.Parse(raw.Text)?.AsObject() ?? throw new InvalidOperationException("Configuration must be a JSON object."));
+        AutomationProperties.SetName(raw, "Complete configuration JSON");
+        var rawBody = new StackPanel(); rawBody.Children.Add(raw); AttachFieldFeedback(raw);
+        var rawExpander = new Expander { Header = "Advanced JSON editor", Content = rawBody }; advanced.Children.Add(rawExpander);
+        raw.TextChanged += (_, _) => MarkDirty();
+        collectValues.Add(() => { try { draft = JsonNode.Parse(raw.Text)?.AsObject() ?? throw new JsonException(); } catch (Exception error) when (error is JsonException or InvalidOperationException) { rawExpander.IsExpanded = true; RejectField(raw, "Enter a valid configuration JSON object."); } });
         SaveBar();
         var docs = Card("REFERENCE");
-        foreach (var pair in new[] { ("A to Z guide", Path.Combine(root, "Guide.md")), ("Original documentation", Path.Combine(root, "Source", "docs", "index.md")), ("Open project folder", root), ("Open config folder", backend.Options.CodexHome) })
+        foreach (var pair in new[] { ("A to Z guide", Path.Combine(root, "Guide.md")), ("Original documentation", OriginalDocumentation(root)), ("Open project folder", root), ("Open config folder", backend.Options.CodexHome) })
         {
             var button = ActionButton(pair.Item1, () => OpenPath(pair.Item2)); button.Margin = new Thickness(0, 4, 0, 4); docs.Children.Add(button);
         }
-        Row(docs, "Desktop app", "1.6.0 · Windows x64"); Row(docs, "Presence engine", "Based on xt0n1-t3ch / Codex Discord Rich Presence 1.11.2");
+        Row(docs, "Desktop app", "1.7.0 · Windows x64"); Row(docs, "Presence engine", "Based on xt0n1-t3ch / Codex Discord Rich Presence 1.11.2");
         docs.Children.Add(Text("MIT licensed · original engine attribution and license included.", 11, Muted));
     }
 
     private static void OpenPath(string path)
     {
+        if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.Scheme == "https") { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); return; }
         if (!File.Exists(path) && !Directory.Exists(path)) throw new FileNotFoundException("This path is not available yet: " + path);
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
@@ -828,7 +861,7 @@ public partial class MainWindow : Window
         if (page == "Overview") RenderOverview();
     }
 
-    public void ShowDashboard() { Show(); WindowState = WindowState.Normal; if (page == "Overview") RenderOverview(); Activate(); }
+    public void ShowDashboard() { Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; if (page == "Overview" && initialized) RenderOverview(); Activate(); }
     private void ShowFromTray() => ShowDashboard();
     public void RequestExit() => _ = Guard(ExitApp);
 
@@ -924,13 +957,12 @@ public partial class MainWindow : Window
     {
         if (closing) return;
         e.Cancel = true;
-        if (backend.Options.CloseToTray) { Hide(); return; }
-        _ = Guard(ExitApp);
+        Dispatcher.BeginInvoke(new Action(() => { if (backend.Options.CloseToTray) Hide(); else RequestExit(); }));
     }
 
     private async Task ExitApp()
     {
-        if (dirty || editors.Values.Any(editor => editor.Dirty)) throw new InvalidOperationException("Save or reload the tabs with unsaved changes before exiting.");
+        if (dirty || editors.Values.Any(editor => editor.Dirty)) { ShowExitDecision(); return; }
         if (terminalProcess is { HasExited: false }) throw new InvalidOperationException("Press Q in the original terminal to close it before exiting this app.");
         await backend.Stop();
         closing = true;
@@ -1104,11 +1136,9 @@ public partial class MainWindow : Window
         await SaveDraft();
         var fixturePath = Path.Combine(backend.Options.CodexHome, "sessions", "fixture.jsonl");
         var originalFixture = File.ReadAllText(fixturePath);
-        var originalModified = File.GetLastWriteTimeUtc(fixturePath);
         var oldTime = DateTimeOffset.UtcNow.AddMinutes(-3).ToString("o");
         var idleFixture = string.Join("\n", originalFixture.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => { var item = JsonNode.Parse(line)!.AsObject(); item["timestamp"] = oldTime; return item.ToJsonString(); }));
         File.WriteAllText(fixturePath, idleFixture + "\n" + JsonSerializer.Serialize(new { type = "response_item", timestamp = oldTime, payload = new { type = "function_call_output", call_id = "fixture-command", output = "done" } }) + "\n" + JsonSerializer.Serialize(new { type = "response_item", timestamp = oldTime, payload = new { type = "message", role = "assistant", channel = "final", content = new[] { new { type = "output_text", text = "Fixture complete." } } } }) + "\n");
-        File.SetLastWriteTimeUtc(fixturePath, originalModified.AddSeconds(-1));
         for (var attempt = 0; attempt < 40 && !B(backend.Snapshot?["idle_timeout_hidden"]); attempt++) await Task.Delay(100);
         File.WriteAllText(Path.Combine(evidence, "idle-expired.json"), backend.Snapshot!.ToJsonString(Backend.JsonOptions));
         Check(B(backend.Snapshot?["idle_timeout_hidden"]) && backend.Running && S(backend.Snapshot?["discord_status"]) == "Hidden · idle timeout reached", "A parsed idle session automatically hides presence after the selected duration");
@@ -1243,6 +1273,7 @@ public partial class MainWindow : Window
             Check(PageBody.Children.Count > 0, name + " page builds");
             Capture(name);
         }
+        await AuditChecks(checks, evidence);
         dirty = false;
         await backend.Stop();
         Check(!backend.Running, "Quit command gracefully stops the owned engine");

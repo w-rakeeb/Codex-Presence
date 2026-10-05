@@ -44,6 +44,9 @@ public static class Appearance
             brush.Freeze();
             window.Resources[color.Key] = brush;
         }
+        var error = new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? "#B91C1C" : "#FCA5A5"));
+        error.Freeze();
+        window.Resources["Error"] = error;
         var soft = preferences.InterfaceStyle == "soft";
         var chat = preferences.InterfaceStyle == "chatgpt";
         var paper = preferences.InterfaceStyle == "paper";

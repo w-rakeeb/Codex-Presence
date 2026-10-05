@@ -45,7 +45,7 @@ Discord provides a heading and two text fields. With the normal app heading, act
 | Show the hidden dashboard | Open the executable again |
 | Stop the app and its owned engine | Exit in the dashboard or tray menu |
 
-A dot beside a tab marks unsaved changes. **Reload** discards changes on that tab. Running in the background retains drafts in memory; save them before exiting. Exit asks you to resolve pending changes instead of silently losing them.
+A dot beside a tab marks unsaved changes. **Reload** asks before discarding changes on that tab. Running in the background retains drafts in memory. Exit offers Review changes, Exit without saving, or Cancel, including when the dashboard was hidden.
 
 ## Privacy and local data
 
@@ -67,9 +67,9 @@ Use PowerShell 7, the .NET 8 SDK and the stable Rust toolchain with the Windows 
 ./scripts/package-desktop.ps1 -AppRoot "$PWD/.build/desktop"
 ```
 
-Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.6.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
+Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.7.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
 
-Version 1.6.0 passed 284 Rust tests and 205 desktop checks in both same-drive and cross-drive configurations. Checks cover timed idle hiding and automatic restoration, manual-pause/priority preservation, live appearance previews, settings sections and edits made during asynchronous saves. All 40 style/theme/mode combinations are checked at 460-pixel width for layout and text/button contrast. Earlier native checks covered dropdown selection and both heading toggles. Tests use synthetic sessions and process names; no games are launched. These results describe the tested Windows 11 environment; see the [release checklist](docs/desktop-release.md) for limitations.
+Version 1.7.0 passed 286 Rust tests and 308 desktop checks in both same-drive and cross-drive configurations. Checks cover idle hiding, priority, terminal recovery, damaged preferences, atomic backups, failed saves, asynchronous tab changes and the actual window Close event. Every page and Settings section is checked at nine widths from 320 to 1920 logical pixels. All 40 style/theme/mode combinations are checked at 460-pixel width for layout and text/button contrast. Native mouse and keyboard checks cover dropdown selection, appearance preview, retained drafts, Ctrl+S, resizing, scrolling and field reordering. Tests use synthetic sessions and process names; no games are launched. See the [audit coverage](docs/desktop-audit.md) and [release checklist](docs/desktop-release.md) for practical limits.
 
 The Rust engine and original terminal documentation remain available in [docs/index.md](docs/index.md), [CHANGELOG.md](CHANGELOG.md) and the source tree.
 

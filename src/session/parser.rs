@@ -48,7 +48,9 @@ pub(super) fn parse_session_file_cached(
         .entry(key)
         .or_insert_with(|| CachedSessionEntry::new(modified));
 
-    let should_reset = cached.cursor > file_len || modified < cached.modified;
+    let should_reset = cached.cursor > file_len
+        || modified < cached.modified
+        || (modified != cached.modified && file_len <= cached.file_len);
     if should_reset {
         cached.reset(modified);
     }
@@ -62,6 +64,24 @@ pub(super) fn parse_session_file_cached(
 
     let mut file = File::open(jsonl_path)
         .with_context(|| format!("failed to open session file {}", jsonl_path.display()))?;
+    let head_len = if cached.head.is_empty() {
+        file_len.min(512) as usize
+    } else {
+        cached.head.len().min(file_len.min(512) as usize)
+    };
+    let mut head = vec![0; head_len];
+    file.read_exact(&mut head)?;
+    let mut tail = vec![0; cached.tail.len()];
+    if !tail.is_empty() {
+        file.seek(SeekFrom::Start(
+            cached.cursor.saturating_sub(tail.len() as u64),
+        ))?;
+        file.read_exact(&mut tail)?;
+    }
+    if (!cached.head.is_empty() && head != cached.head) || tail != cached.tail {
+        cached.reset(modified);
+    }
+    cached.head = head;
     file.seek(SeekFrom::Start(cached.cursor))
         .with_context(|| format!("failed to seek session file {}", jsonl_path.display()))?;
     let mut reader = BufReader::new(file);
@@ -71,6 +91,10 @@ pub(super) fn parse_session_file_cached(
         &mut cached.partial_line_buffer,
     )?;
     cached.cursor = reader.stream_position().unwrap_or(file_len);
+    let tail_len = cached.cursor.min(512) as usize;
+    cached.tail.resize(tail_len, 0);
+    reader.seek(SeekFrom::Start(cached.cursor - tail_len as u64))?;
+    reader.read_exact(&mut cached.tail)?;
     cached.file_len = file_len;
     cached.modified = modified;
 

@@ -37,21 +37,63 @@ public sealed class Preferences
 
     public bool SameMonitoring(Preferences other) => CodexHome == other.CodexHome && PollSeconds == other.PollSeconds && StaleSeconds == other.StaleSeconds && StickySeconds == other.StickySeconds && IncludeWsl == other.IncludeWsl && EfficiencyMode == other.EfficiencyMode && MonitorOnly == other.MonitorOnly;
 
-    public static Preferences Load(string root)
+    public static Preferences Load(string root) => Load(root, out _);
+
+    public static Preferences Load(string root, out string? warning)
     {
+        warning = null;
         var path = Path.Combine(root, "Data", "app-settings.json");
-        return File.Exists(path) ? JsonSerializer.Deserialize<Preferences>(File.ReadAllText(path)) ?? new() : new();
+        try
+        {
+            var value = File.Exists(path) ? JsonSerializer.Deserialize<Preferences>(File.ReadAllText(path)) ?? throw new JsonException("Settings must be an object.") : new();
+            if (string.IsNullOrWhiteSpace(value.CodexHome) || !Path.IsPathFullyQualified(value.CodexHome)) throw new JsonException("Codex home must be an absolute folder path.");
+            value.CodexHome = Path.GetFullPath(value.CodexHome);
+            if (value.PollSeconds is < 1 or > 60 || value.StaleSeconds is < 1 or > 86400 || value.StickySeconds is < 60 or > 86400)
+            {
+                value.PollSeconds = Math.Clamp(value.PollSeconds, 1, 60);
+                value.StaleSeconds = Math.Clamp(value.StaleSeconds, 1, 86400);
+                value.StickySeconds = Math.Clamp(value.StickySeconds, 60, 86400);
+                warning = "Monitoring values were outside their supported ranges. Review Settings before saving. The original file is unchanged.";
+            }
+            value.PriorityApplications ??= "";
+            return value;
+        }
+        catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            warning = "Could not read desktop settings. Safe defaults are active; the original file is unchanged. Review Settings or restore a backup. " + error.Message;
+            return new Preferences();
+        }
     }
 
     public void Save(string root)
     {
-        Directory.CreateDirectory(Path.Combine(root, "Data"));
-        File.WriteAllText(Path.Combine(root, "Data", "app-settings.json"), JsonSerializer.Serialize(this, Backend.JsonOptions));
+        var folder = Path.Combine(root, "Data");
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "app-settings.json");
+        var contents = JsonSerializer.Serialize(this, Backend.JsonOptions);
+        if (File.Exists(path) && File.ReadAllText(path) == contents) return;
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, contents, new UTF8Encoding(false));
+            if (File.Exists(path))
+            {
+                var backups = Path.Combine(folder, "Backups", "Preferences");
+                Directory.CreateDirectory(backups);
+                File.Copy(path, Path.Combine(backups, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json"));
+                File.Replace(temporary, path, null);
+            }
+            else File.Move(temporary, path);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     public void ApplyStartup()
     {
-        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+        using var key = StartWithWindows || StartWithChatGpt
+            ? Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")
+            : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
+        if (key == null) return;
         if (StartWithWindows || StartWithChatGpt)
             key.SetValue("CodexPresenceDesktop", "\"" + Environment.ProcessPath + "\" " + (StartWithWindows ? "--startup" : "--watch"));
         else if (key.GetValue("CodexPresenceDesktop") is string command && command.Contains(Environment.ProcessPath ?? "\0", StringComparison.OrdinalIgnoreCase))
@@ -109,15 +151,28 @@ public sealed class Backend
         return info;
     }
 
-    public async Task<string> Command(string arguments, string? input = null)
+    public Task<string> Command(string arguments, string? input = null) => RunCommand(CreateStartInfo(arguments), input, TimeSpan.FromSeconds(30));
+
+    internal static async Task<string> RunCommand(ProcessStartInfo start, string? input, TimeSpan limit)
     {
-        using var child = new Process { StartInfo = CreateStartInfo(arguments) };
+        using var child = new Process { StartInfo = start };
         child.Start();
         var output = child.StandardOutput.ReadToEndAsync();
         var error = child.StandardError.ReadToEndAsync();
-        if (input != null) await child.StandardInput.WriteAsync(input);
-        child.StandardInput.Close();
-        await child.WaitForExitAsync();
+        using var timeout = new CancellationTokenSource(limit);
+        try
+        {
+            if (input != null) await child.StandardInput.WriteAsync(input.AsMemory(), timeout.Token);
+            child.StandardInput.Close();
+            await child.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!child.HasExited) child.Kill(true);
+            await child.WaitForExitAsync();
+            await Task.WhenAll(output, error);
+            throw new IOException("The request timed out. Check that the Codex folder is accessible, then try again.");
+        }
         var result = await output;
         var problem = await error;
         if (child.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(problem) ? result.Trim() : problem.Trim());
@@ -137,9 +192,9 @@ public sealed class Backend
 
     public async Task LoadConfig()
     {
-        var before = HashFile();
+        var before = await Task.Run(HashFile);
         var value = JsonNode.Parse(await Command("config-get"))!.AsObject();
-        var after = HashFile();
+        var after = await Task.Run(HashFile);
         if (before != after) throw new IOException("Settings changed while loading. Reload and try again.");
         Config = value;
         baseHash = after;
@@ -220,7 +275,7 @@ public sealed class Backend
             {
                 try
                 {
-                    var value = JsonNode.Parse(line)!.AsObject();
+                    if (JsonNode.Parse(line) is not JsonObject value) { Logged?.Invoke(line); continue; }
                     Volatile.Write(ref snapshot, value);
                     Updated?.Invoke(value);
                     ready.TrySetResult(true);

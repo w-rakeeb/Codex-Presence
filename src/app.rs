@@ -759,15 +759,19 @@ pub fn run_desktop_bridge(
     let input_stop = Arc::clone(&stop);
     let priority = Arc::new(AtomicBool::new(priority_hold));
     let input_priority = Arc::clone(&priority);
+    let (wake_sender, wake_receiver) = std::sync::mpsc::channel();
     thread::spawn(move || {
         for line in io::stdin().lock().lines() {
-            if line.map_or(true, |line| {
+            let finished = line.map_or(true, |line| {
                 !apply_bridge_control(line.trim(), &input_priority)
-            }) {
+            });
+            let _ = wake_sender.send(());
+            if finished {
                 break;
             }
         }
         input_stop.store(true, Ordering::Relaxed);
+        let _ = wake_sender.send(());
     });
     let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
@@ -875,7 +879,8 @@ pub fn run_desktop_bridge(
             && !stop.load(Ordering::Relaxed)
             && priority.load(Ordering::Relaxed) == priority_held
         {
-            thread::sleep(Duration::from_millis(100));
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let _ = wake_receiver.recv_timeout(remaining.min(Duration::from_secs(1)));
         }
     }
     discord.shutdown();
