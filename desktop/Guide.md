@@ -4,7 +4,7 @@
 
 Extract the release zip, keep its files together and open **Codex Presence.exe**. Keep Discord desktop open, then click **Start presence**. Tools can create a desktop shortcut. Codex activity is detected from local session files. The default home is `%USERPROFILE%\.codex`, or the inherited `CODEX_HOME` environment variable. No Discord token or bot setup is needed.
 
-The first launch stays stopped until you click Start. The app uses the original project's Discord application identities and images. If another presence engine is running, the app reports that instead of stopping it.
+The first launch stays stopped until you click Start. Default mode uses the original project's Discord application identities and images. You can select your own Application ID in Settings. If another presence engine is running, the app reports that instead of stopping it.
 
 The compact Windows x64 build requires Microsoft's [.NET 8 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0). The SDK is unnecessary for running the app. The GUI executable and `Runtime` folder belong together. The source repository is distributed separately through GitHub. Windows 11 is tested locally; the app includes Windows 10-compatible controls, font fallbacks and DPI handling, but a real Windows 10 test remains outstanding.
 
@@ -34,7 +34,7 @@ Local dashboard information remains visible. The engine reads local session/meta
 
 ## Layout
 
-Choose **Codex App** or **ChatGPT App** desktop identity. Authoritative session metadata still selects CLI, VS Code or desktop activity. Choose compact or descriptive field labels. **Token label** and **Context label** accept up to 16 characters; their defaults are **TK** and **CTX**. Custom text accepts up to 128 characters.
+Choose **Codex App** or **ChatGPT App** under **Application heading**. Authoritative session metadata still selects CLI, VS Code or desktop activity. Choose compact or descriptive field labels. **Token label** and **Context label** accept up to 16 characters; their defaults are **TK** and **CTX**. Custom text accepts up to 128 characters. Select the connection's Application ID in Settings → Activity, independently of this heading.
 
 **Use the chat title for the project field** reads the latest name/title from the local Codex thread database, including renames, with the session index as a fallback. Missing titles fall back to the folder name. Disable this option to display folder names. The database is opened read-only, and title changes are checked with each session poll.
 
@@ -54,6 +54,7 @@ Use the **Appearance**, **Activity**, **Background** and **Advanced** section bu
 - **Interface style:** Minimal uses compact outlined cards. Soft uses serif headings and rounder controls. Rounded uses pill controls and borderless cards. Paper uses Cambria headings, ruled sections and a page icon. Studio uses sans-serif headings, outlined rounded cards and a grid icon. All five change typography, spacing, boxes or icons independently of color.
 - **Color mode:** Dark or Light, independent of the interface style. Choose both and click **Save changes**. Appearance changes preserve the active engine and Discord connection.
 - **Color theme:** Neutral retains black and white. Slate uses cool blue, Forest muted green and Dusk warm purple. Each has dark and light variants. Interface style, color theme and color mode are independent; choosing colors does not change the box or typography style.
+- **Discord application:** Default restores the built-in IDs and artwork. Custom uses your public Application ID on every surface, with optional application-specific image keys. Save applies the selection on the next poll and reconnects Discord when necessary; it does not restart monitoring or reset continuous time. Switching to Default keeps your custom ID and keys saved. Invalid custom IDs are rejected with an inline message; they never silently fall back to the original author.
 - **Hide presence when inactive / Hide after (minutes):** enable automatic hiding in Activity and choose 1–1440 minutes. The entire presence clears after Codex is idle or waiting for that long, and returns when work resumes. A long-running command stays active. Without prior activity, a missing session starts the timeout at the first empty poll; an unknown activity falls back to the session's last update. For a session already idle longer than your duration, hiding can happen immediately after saving. The dashboard shows the remaining idle time. Initially disabled, with 5 minutes offered when you enable it. This option does not quit the app or stop local monitoring; manual Pause and app priority remain respected.
 - **Presence timer:** Continuous counts from when this companion app opened and continues through edits, project switches, pauses, reconnects and engine restarts inside the same app session. Closing/reopening the companion begins a new timer. Work / project uses the current session's last activity time and resets with new work. The selection updates without restarting the engine. The terminal launcher receives the same continuous start time when launched from this app.
 - **Hide only the clock while idle or waiting:** the earlier clock-only option remains available independently of automatic presence hiding. It removes the clock immediately for Idle or Waiting for input. Continuous excludes that interval on resume; Work / project uses new work. It does not hide the presence itself. Initially off.
@@ -78,7 +79,7 @@ Use the **Appearance**, **Activity**, **Background** and **Advanced** section bu
 - Efficiency mode uses Below Normal priority so updates remain responsive under load. Git branch queries skip folders outside repositories and time out after 500 ms; a stalled lookup can leave the branch unavailable without blocking presence.
 - **Branding:** every original image key and tooltip, per-activity small-image overrides, plus terminal logo mode/path. Asset keys refer to images available on the original Discord applications; they do not upload images. Terminal logo settings apply to the original terminal interface.
 - **Pricing:** aliases and model rate overrides in JSON. Rates are USD per million tokens. Example below.
-- **Engine identity:** the schema, IDs and public verification key. The original engine enforces its supported identities when validating settings.
+- **Engine information:** the schema and built-in application IDs. These defaults remain available independently of your custom application selection.
 
 ```json
 {
@@ -132,7 +133,17 @@ Stop the desktop engine before manually starting `terminal-view`; it rejects dup
 
 If another application edits the shared configuration, saving is rejected to preserve its edits. Click Reload, reapply your choices, and save. To restore a backup, exit the app first, copy the desired backup over `discord-presence-config.json`, and reopen. Do not replace Codex authentication files.
 
-Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Desktop preferences also use atomic replacement and exact backups under `Data/Backups/Preferences`. Damaged desktop preferences open with safe defaults and a warning, preserving the original file. Unchanged settings do not create extra backups. Version 1.7.0 uses schema 17. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
+Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Desktop preferences also use atomic replacement and exact backups under `Data/Backups/Preferences`. Damaged desktop preferences open with safe defaults and a warning, preserving the original file. Unchanged settings do not create extra backups. Version 1.8.0 uses schema 18; migration selects Default and preserves existing presence preferences. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
+
+## Your own Discord application
+
+1. Open the [Discord developer portal](https://discord.com/developers/applications), choose **New Application**, and give it a name.
+2. In **General Information**, copy the **Application ID**. It is a public number, not a bot token or client secret.
+3. For artwork, open **Rich Presence → Art Assets** and upload your images. Discord recommends 1024 × 1024 images and converts asset keys to lowercase. Suggested keys: `codex-app` for the large image and `openai` for the small image. You can use your own keys or leave a field blank to omit that image. The General Information app icon and Rich Presence art assets are separate.
+4. In Codex Presence, open **Settings → Activity → Discord application**, choose **Custom**, and paste the ID. Expand **Custom application images** and enter the matching keys. Click **Save changes** with Discord desktop running.
+5. Choose **Default** and save to return to the original applications. Expand **Built-in application IDs** to view them; your saved custom configuration remains available.
+
+Local Rich Presence does not require creating a bot user, inviting a bot to a server, OAuth scopes, Administrator permissions, privileged intents, a public key or any token. Do not enter secrets in the ID field. The app validates the number's format; Discord determines whether the application exists and its artwork is available. A missing image does not grant permissions or prevent text from being shown. Registered application settings do not change this app's chosen Codex/ChatGPT heading or privacy controls. See [Discord's Rich Presence documentation](https://discord.com/developers/discord-social-sdk/development-guides/setting-rich-presence#rich-presence-without-authentication).
 
 ## Troubleshooting
 

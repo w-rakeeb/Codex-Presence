@@ -18,7 +18,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 17;
+const CONFIG_SCHEMA_VERSION: u32 = 18;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -32,10 +32,70 @@ pub struct PresenceConfig {
     pub discord_client_id: Option<String>,
     pub discord_client_id_desktop: Option<String>,
     pub discord_public_key: Option<String>,
+    #[serde(deserialize_with = "deserialize_discord_application")]
+    pub discord_application: DiscordApplicationConfig,
     pub privacy: PrivacyConfig,
     pub display: DisplayConfig,
     pub pricing: PricingConfig,
     pub openai_plan: OpenAiPlanDisplayConfig,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscordApplicationMode {
+    #[default]
+    Default,
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DiscordApplicationConfig {
+    pub mode: DiscordApplicationMode,
+    pub application_id: Option<String>,
+    pub large_image_key: String,
+    pub small_image_key: Option<String>,
+}
+
+impl Default for DiscordApplicationConfig {
+    fn default() -> Self {
+        Self {
+            mode: DiscordApplicationMode::Default,
+            application_id: None,
+            large_image_key: "codex-app".to_string(),
+            small_image_key: Some("openai".to_string()),
+        }
+    }
+}
+
+pub fn valid_discord_application_id(value: &str) -> bool {
+    let value = value.trim();
+    (17..=20).contains(&value.len())
+        && !value.starts_with('0')
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<u64>().is_ok_and(|id| id > 0)
+}
+
+fn deserialize_discord_application<'de, D>(
+    deserializer: D,
+) -> std::result::Result<DiscordApplicationConfig, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let application = DiscordApplicationConfig::deserialize(deserializer)?;
+    let id = application
+        .application_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    if id.is_some_and(|id| !valid_discord_application_id(id))
+        || (application.mode == DiscordApplicationMode::Custom && id.is_none())
+    {
+        return Err(serde::de::Error::custom(
+            "Custom Discord application requires a valid Application ID from General Information (17–20 digits). Do not enter a bot token.",
+        ));
+    }
+    Ok(application)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -516,6 +576,7 @@ impl Default for PresenceConfig {
             discord_client_id: Some(DEFAULT_DISCORD_CLIENT_ID.to_string()),
             discord_client_id_desktop: Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID.to_string()),
             discord_public_key: Some(DEFAULT_DISCORD_PUBLIC_KEY.to_string()),
+            discord_application: DiscordApplicationConfig::default(),
             privacy: PrivacyConfig::default(),
             display: DisplayConfig::default(),
             pricing: PricingConfig::default(),
@@ -659,6 +720,14 @@ impl PresenceConfig {
     }
 
     pub fn effective_client_id_for_surface(&self, surface: PresenceSurface) -> Option<String> {
+        if self.discord_application.mode == DiscordApplicationMode::Custom {
+            return self
+                .discord_application
+                .application_id
+                .as_deref()
+                .filter(|id| valid_discord_application_id(id))
+                .map(|id| id.trim().to_string());
+        }
         Some(codex_client_id_for_surface(surface, self.display.desktop_presence_design).to_string())
     }
 
@@ -669,6 +738,14 @@ impl PresenceConfig {
     fn normalize_and_migrate(&mut self) -> bool {
         let mut changed = false;
         let default_display = DisplayConfig::default();
+
+        changed |= normalize_optional_string(&mut self.discord_application.application_id);
+        changed |= normalize_optional_string(&mut self.discord_application.small_image_key);
+        let image_key = self.discord_application.large_image_key.trim().to_string();
+        if self.discord_application.large_image_key != image_key {
+            self.discord_application.large_image_key = image_key;
+            changed = true;
+        }
 
         if self.display.idle_timeout_minutes > 1440 {
             self.display.idle_timeout_minutes = 1440;
@@ -1238,6 +1315,127 @@ mod tests {
     use super::*;
 
     #[test]
+    fn custom_application_id_is_selected_for_every_surface_without_losing_defaults() {
+        let mut config = PresenceConfig::default();
+        config.discord_application.mode = DiscordApplicationMode::Custom;
+        config.discord_application.application_id = Some(" 123456789012345678 ".to_string());
+        config.discord_application.large_image_key = " own-large ".to_string();
+        config.discord_application.small_image_key = Some(" own-small ".to_string());
+        assert!(config.normalize_for_runtime());
+        assert_eq!(config.discord_application.large_image_key, "own-large");
+        assert_eq!(
+            config.discord_application.small_image_key.as_deref(),
+            Some("own-small")
+        );
+        for design in [
+            DesktopPresenceDesign::CodexApp,
+            DesktopPresenceDesign::ChatGptApp,
+        ] {
+            config.display.desktop_presence_design = design;
+            for surface in [
+                PresenceSurface::Cli,
+                PresenceSurface::VsCode,
+                PresenceSurface::Desktop,
+            ] {
+                assert_eq!(
+                    config.effective_client_id_for_surface(surface).as_deref(),
+                    Some("123456789012345678")
+                );
+            }
+        }
+        config.discord_application.mode = DiscordApplicationMode::Default;
+        config.normalize_for_runtime();
+        assert_eq!(
+            config.effective_client_id().as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
+        config.display.desktop_presence_design = DesktopPresenceDesign::CodexApp;
+        assert_eq!(
+            config
+                .effective_client_id_for_surface(PresenceSurface::Desktop)
+                .as_deref(),
+            Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID)
+        );
+        assert_eq!(
+            config.discord_application.application_id.as_deref(),
+            Some("123456789012345678")
+        );
+        assert_eq!(config.discord_application.large_image_key, "own-large");
+    }
+
+    #[test]
+    fn custom_application_rejects_missing_tokens_urls_unicode_and_overflow_ids() {
+        for id in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("000000000000000000"),
+            Some("bot.token.value"),
+            Some("https://discord.com/123456789012345678"),
+            Some("１２３４５６７８９０１２３４５６７８９"),
+            Some("18446744073709551616"),
+        ] {
+            let value =
+                serde_json::json!({"discord_application":{"mode":"custom","application_id":id}});
+            let error = serde_json::from_value::<PresenceConfig>(value).unwrap_err();
+            assert!(error.to_string().contains("Application ID"));
+        }
+        assert!(valid_discord_application_id("18446744073709551615"));
+        assert!(valid_discord_application_id(" 123456789012345678 "));
+    }
+
+    #[test]
+    fn invalid_custom_id_never_falls_back_to_the_original_author() {
+        let mut config = PresenceConfig::default();
+        config.discord_application.mode = DiscordApplicationMode::Custom;
+        for id in [None, Some("invalid".to_string())] {
+            config.discord_application.application_id = id;
+            assert_eq!(config.effective_client_id(), None);
+            assert_eq!(
+                config.effective_client_id_for_surface(PresenceSurface::Desktop),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_original_application_and_retains_other_preferences() {
+        let mut config: PresenceConfig = serde_json::from_str(r#"{"schema_version":17,"display":{"timer_mode":"continuous","idle_timeout_minutes":5},"privacy":{"show_model":false}}"#).unwrap();
+        assert!(config.normalize_for_runtime());
+        assert_eq!(config.schema_version, 18);
+        assert_eq!(
+            config.discord_application,
+            DiscordApplicationConfig::default()
+        );
+        assert_eq!(config.display.timer_mode, PresenceTimerMode::Continuous);
+        assert_eq!(config.display.idle_timeout_minutes, 5);
+        assert!(!config.privacy.show_model);
+        assert_eq!(
+            config.effective_client_id(),
+            Some(DEFAULT_DISCORD_CLIENT_ID.to_string())
+        );
+    }
+
+    #[test]
+    fn default_mode_retains_valid_custom_ids_but_invalid_ids_and_modes_are_rejected() {
+        let value = serde_json::json!({"discord_application":{"mode":"default","application_id":"123456789012345678","large_image_key":"custom-logo","small_image_key":null}});
+        let config: PresenceConfig = serde_json::from_value(value.clone()).unwrap();
+        let restored: PresenceConfig =
+            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        assert_eq!(restored.discord_application, config.discord_application);
+        assert_eq!(
+            restored.effective_client_id().as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
+        let mut invalid = value;
+        invalid["discord_application"]["application_id"] = serde_json::json!("bot.token.value");
+        assert!(serde_json::from_value::<PresenceConfig>(invalid.clone()).is_err());
+        invalid["discord_application"]["application_id"] = serde_json::Value::Null;
+        invalid["discord_application"]["mode"] = serde_json::json!("unknown");
+        assert!(serde_json::from_value::<PresenceConfig>(invalid).is_err());
+    }
+
+    #[test]
     fn configured_client_id_is_rewritten_to_codex_default() {
         let cfg = PresenceConfig {
             discord_client_id: Some("from-config".to_string()),
@@ -1258,6 +1456,7 @@ mod tests {
             discord_client_id: None,
             discord_client_id_desktop: None,
             discord_public_key: None,
+            discord_application: DiscordApplicationConfig::default(),
             privacy: PrivacyConfig::default(),
             display: DisplayConfig::default(),
             pricing: PricingConfig::default(),
@@ -1267,7 +1466,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 17);
+        assert_eq!(cfg.schema_version, CONFIG_SCHEMA_VERSION);
         assert!(cfg.presence_enabled);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
@@ -1530,7 +1729,7 @@ mod tests {
         )
         .unwrap();
         config.normalize_for_runtime();
-        assert_eq!(config.schema_version, 17);
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
         assert!(!config.privacy.show_project_name);
         assert!(!config.privacy.show_model);
         assert!(config.privacy.show_subscription);

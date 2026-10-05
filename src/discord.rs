@@ -837,6 +837,14 @@ fn display_branding<'a>(
     config: &'a PresenceConfig,
 ) -> SurfaceDisplay<'a> {
     let label = surface.label(config.display.desktop_presence_design);
+    if config.discord_application.mode == crate::config::DiscordApplicationMode::Custom {
+        return SurfaceDisplay {
+            activity_name: label,
+            large_image_key: &config.discord_application.large_image_key,
+            large_text: label,
+            idle_details: label,
+        };
+    }
     match (surface, config.display.desktop_presence_design) {
         (PresenceSurface::Cli | PresenceSurface::VsCode, _)
         | (PresenceSurface::Desktop, DesktopPresenceDesign::ChatGptApp) => SurfaceDisplay {
@@ -901,7 +909,11 @@ pub(crate) fn active_presence_presentation_with_credits(
         (None, None)
     } else {
         let (key, text) = small_asset_for_activity(session, config);
-        (Some(key), Some(text))
+        if key.is_empty() {
+            (None, None)
+        } else {
+            (Some(key), Some(text))
+        }
     };
     PresencePresentation {
         app_name: if config.display.activity_project_heading
@@ -1488,6 +1500,22 @@ fn small_asset_for_activity(
     session: &CodexSessionSnapshot,
     config: &PresenceConfig,
 ) -> (String, String) {
+    if config.discord_application.mode == crate::config::DiscordApplicationMode::Custom {
+        return (
+            config
+                .discord_application
+                .small_image_key
+                .clone()
+                .unwrap_or_default(),
+            session
+                .activity
+                .as_ref()
+                .map(|activity| {
+                    truncate_for_limit(&activity.to_text(config.privacy.show_activity_target), 128)
+                })
+                .unwrap_or_else(|| config.display.small_text.clone()),
+        );
+    }
     let fallback_key = config.display.small_image_key.clone();
     let fallback_text = config.display.small_text.clone();
     let Some(activity) = &session.activity else {
@@ -1654,6 +1682,166 @@ mod tests {
         let mut config = PresenceConfig::default();
         config.display.separate_usage_line = false;
         config
+    }
+
+    fn custom_config() -> PresenceConfig {
+        let mut config = PresenceConfig::default();
+        config.discord_application.mode = crate::config::DiscordApplicationMode::Custom;
+        config.discord_application.application_id = Some("123456789012345678".to_string());
+        config.discord_application.large_image_key = "own-large".to_string();
+        config.discord_application.small_image_key = Some("own-small".to_string());
+        config
+    }
+
+    #[test]
+    fn custom_assets_are_used_for_active_and_idle_presence_on_all_surfaces() {
+        let config = custom_config();
+        for surface in [
+            PresenceSurface::Cli,
+            PresenceSurface::VsCode,
+            PresenceSurface::Desktop,
+        ] {
+            let active = active_presence_presentation(
+                surface,
+                &sample_session(),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config,
+            );
+            assert_eq!(
+                active.app_name,
+                surface.label(config.display.desktop_presence_design)
+            );
+            assert_eq!(active.large_image_key, "own-large");
+            assert_eq!(active.small_image_key.as_deref(), Some("own-small"));
+            let idle = idle_presence_presentation(surface, &config);
+            assert_eq!(idle.large_image_key, "own-large");
+            assert_eq!(idle.small_image_key, None);
+        }
+    }
+
+    #[test]
+    fn custom_images_can_be_omitted_and_privacy_still_hides_activity_assets() {
+        let mut config = custom_config();
+        for hidden in [false, true] {
+            config.privacy.enabled = hidden;
+            let presentation = active_presence_presentation(
+                PresenceSurface::Desktop,
+                &sample_session(),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config,
+            );
+            assert_eq!(presentation.small_image_key.is_none(), hidden);
+        }
+        config.privacy.enabled = false;
+        config.discord_application.small_image_key = None;
+        config.discord_application.large_image_key.clear();
+        let presentation = active_presence_presentation(
+            PresenceSurface::Desktop,
+            &sample_session(),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+        assert_eq!(presentation.small_image_key, None);
+        assert_eq!(presentation.small_text, None);
+        assert_eq!(resolve_image_key(&presentation.large_image_key, None), None);
+        config.discord_application.small_image_key = Some("own-small".to_string());
+        config.privacy.show_systems = false;
+        assert_eq!(
+            active_presence_presentation(
+                PresenceSurface::Desktop,
+                &sample_session(),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config
+            )
+            .small_image_key,
+            None
+        );
+    }
+
+    #[test]
+    fn custom_application_changes_clear_asset_catalog_and_retry_state_without_resetting_continuous_time()
+     {
+        let mut config = custom_config();
+        let mut presence = DiscordPresence::new(Some(
+            crate::config::DEFAULT_DISCORD_DESKTOP_CLIENT_ID.to_string(),
+        ));
+        presence.suppress_ipc_connect = true;
+        presence.continuous_start_epoch = 100;
+        presence.known_asset_keys = Some(HashSet::from(["upstream-only".to_string()]));
+        presence.last_asset_refresh_at = Some(Instant::now());
+        presence.consecutive_errors = 3;
+        presence
+            .update(
+                Some(&sample_session()),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config,
+                PresenceSurface::Desktop,
+            )
+            .unwrap();
+        assert_eq!(presence.client_id.as_deref(), Some("123456789012345678"));
+        assert!(presence.known_asset_keys.is_none());
+        assert!(presence.last_asset_refresh_at.is_none());
+        assert_eq!(presence.continuous_start_epoch, 100);
+        assert_eq!(presence.consecutive_errors, 0);
+        config.discord_application.mode = crate::config::DiscordApplicationMode::Default;
+        presence
+            .update(
+                None,
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(false),
+                &config,
+                PresenceSurface::Desktop,
+            )
+            .unwrap();
+        assert_eq!(
+            presence.client_id.as_deref(),
+            Some(crate::config::DEFAULT_DISCORD_DESKTOP_CLIENT_ID)
+        );
+        assert_eq!(presence.continuous_start_epoch, 100);
+    }
+
+    #[test]
+    fn custom_application_preserves_both_heading_layouts_model_usage_and_visibility() {
+        let mut config = custom_config();
+        let session = sample_session();
+        for heading in [false, true] {
+            config.display.activity_project_heading = heading;
+            for fast in [false, true] {
+                let custom = active_presence_presentation(
+                    PresenceSurface::Desktop,
+                    &session,
+                    None,
+                    &resolved_plan_pro(),
+                    &resolved_service_tier(fast),
+                    &config,
+                );
+                let mut default = config.clone();
+                default.discord_application.mode = crate::config::DiscordApplicationMode::Default;
+                let original = active_presence_presentation(
+                    PresenceSurface::Desktop,
+                    &session,
+                    None,
+                    &resolved_plan_pro(),
+                    &resolved_service_tier(fast),
+                    &default,
+                );
+                assert_eq!(
+                    (custom.app_name, custom.details, custom.state),
+                    (original.app_name, original.details, original.state)
+                );
+            }
+        }
     }
 
     #[test]

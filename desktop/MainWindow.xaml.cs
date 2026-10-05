@@ -600,7 +600,7 @@ public partial class MainWindow : Window
         groupedText.Checked += (_, _) => activityTitle.IsEnabled = true;
         groupedText.Unchecked += (_, _) => activityTitle.IsEnabled = false;
         var identity = Card("APPLICATION & LABELS");
-        EditChoice(identity, display, "desktop_presence_design", "Discord application", new[] { "codex_app", "chat_gpt_app" });
+        EditChoice(identity, display, "desktop_presence_design", "Application heading", new[] { "codex_app", "chat_gpt_app" });
         EditChoice(identity, layout, "label_style", "Field labels", new[] { "compact", "descriptive" });
         var labels = Card("CUSTOM LABELS", "Chat titles use the latest local rename. Folder names are used when a title is unavailable.");
         EditBoolean(labels, display, "use_chat_title", "Use the chat title for the project field");
@@ -701,6 +701,7 @@ public partial class MainWindow : Window
         previewAppearance = PreviewAppearance;
         interfaceStyle.SelectionChanged += (_, _) => PreviewAppearance(); colorMode.SelectionChanged += (_, _) => PreviewAppearance(); colorTheme.SelectionChanged += (_, _) => PreviewAppearance();
         var display = draft["display"]!.AsObject();
+        RenderDiscordApplication();
         var idle = SettingsCard("Activity", "AUTOMATIC IDLE HIDING", "Hide your Discord presence after inactivity. Show it again when Codex resumes work.");
         var idleChoice = new JsonObject { ["enabled"] = N(display["idle_timeout_minutes"]) > 0 };
         var idleEnabled = EditBoolean(idle, idleChoice, "enabled", "Hide presence when inactive");
@@ -767,11 +768,10 @@ public partial class MainWindow : Window
         var pricingExpander = new Expander { Header = "Pricing aliases & overrides (JSON)", Content = pricingBody }; pricing.Children.Add(pricingExpander);
         AutomationProperties.SetName(pricingEditor, "Pricing JSON");
         collectValues.Add(() => { try { draft["pricing"] = JsonNode.Parse(pricingEditor.Text)?.AsObject() ?? throw new JsonException(); } catch (Exception error) when (error is JsonException or InvalidOperationException) { pricingExpander.IsExpanded = true; RejectField(pricingEditor, "Enter a valid pricing JSON object.", "Advanced"); } });
-        var identity = SettingsCard("Advanced", "ENGINE INFORMATION", "Application IDs and assets are maintained by the original engine.");
+        var identity = SettingsCard("Advanced", "ENGINE INFORMATION", "Default IDs are built in. Select your own application in Activity.");
         Row(identity, "Schema", S(draft["schema_version"]));
-        Row(identity, "Default application", S(draft["discord_client_id"]));
-        Row(identity, "Desktop application", S(draft["discord_client_id_desktop"]));
-        identity.Children.Add(JsonViewer("Public verification key", draft["discord_public_key"]));
+        Row(identity, "Default CLI / ChatGPT ID", S(draft["discord_client_id"]));
+        Row(identity, "Default Codex App ID", S(draft["discord_client_id_desktop"]));
         Preferences? pending = null;
         collectValues.Add(() =>
         {
@@ -819,7 +819,7 @@ public partial class MainWindow : Window
         {
             var button = ActionButton(pair.Item1, () => OpenPath(pair.Item2)); button.Margin = new Thickness(0, 4, 0, 4); docs.Children.Add(button);
         }
-        Row(docs, "Desktop app", "1.7.0 · Windows x64"); Row(docs, "Presence engine", "Based on xt0n1-t3ch / Codex Discord Rich Presence 1.11.2");
+        Row(docs, "Desktop app", (typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "Unknown") + " · Windows x64"); Row(docs, "Presence engine", "Based on xt0n1-t3ch / Codex Discord Rich Presence 1.11.2");
         docs.Children.Add(Text("MIT licensed · original engine attribution and license included.", 11, Muted));
     }
 
@@ -1053,7 +1053,7 @@ public partial class MainWindow : Window
         projectCheckbox.IsChecked = true;
         await SaveDraft();
         Check(B(backend.Config?["privacy"]?["show_project_name"]) && backend.Config?["display"]?["presence_layout"]?["fields"] is JsonArray enabledFields && enabledFields.Any(field => S(field?["field"]) == "project" && B(field?["enabled"])), "Layout visibility control saves and stays synchronized with privacy");
-        var identityCombo = Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Discord application");
+        var identityCombo = Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Application heading");
         identityCombo.SelectedValue = "chat_gpt_app";
         await SaveDraft();
         Check(S(backend.Config?["display"]?["desktop_presence_design"]) == "chat_gpt_app", "Desktop identity dropdown saves its engine value");
@@ -1273,6 +1273,7 @@ public partial class MainWindow : Window
             Check(PageBody.Children.Count > 0, name + " page builds");
             Capture(name);
         }
+        await DiscordApplicationChecks(checks);
         await AuditChecks(checks, evidence);
         dirty = false;
         await backend.Stop();

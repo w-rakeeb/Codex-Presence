@@ -30,6 +30,7 @@ The release is tested on Windows 11 x64. It uses Windows 10 compatible controls,
 - Three additional color themes: Slate, Forest and Dusk, each with dark and light variants and immediate previews.
 - Settings grouped into Appearance, Activity, Background and Advanced, with consistent navigation icons and dependent controls.
 - The original terminal dashboard, connection diagnostics, desktop shortcuts and local configuration tools.
+- A Default / Custom Discord application selector, with a saved public Application ID and application-specific artwork keys. No bot token is required.
 - The upstream engine's privacy controls, desktop identity handling and cost coverage reporting.
 
 Discord provides a heading and two text fields. With the normal app heading, activity/project occupies the first field and model followed by usage occupies the second. Turn on **Activity/project heading (three rows)** in Layout to use the heading for activity/project, the first field for model/effort and the second for usage. Keep **Group model, tokens and context** enabled for either layout. Discord controls wrapping; three custom rows underneath a retained app heading cannot be forced. This app reads Codex session files. It does not inspect browser chats or parse ordinary ChatGPT conversations.
@@ -53,7 +54,7 @@ Only enabled presence fields are sent to Discord. Session files, settings and th
 
 Desktop preferences live in `Data/app-settings.json` beside the executable. Engine settings use `discord-presence-config.json` in your Codex home directory. Validated saves retain backups. Monetary amounts are estimates based on observed usage; missing pricing or incomplete coverage is reported rather than invented.
 
-No Discord bot token is needed for local Rich Presence. The upstream application identity and assets are retained. See [NOTICE.md](NOTICE.md) for attribution and third-party notices.
+No Discord bot token is needed for local Rich Presence. Default mode retains the upstream application IDs and assets. To use your own, create a Discord application, copy its Application ID from General Information, and choose **Settings → Activity → Discord application → Custom**. Upload artwork to that application's Rich Presence Art Assets and enter the matching keys. No Administrator permission, OAuth scopes, server invite or privileged intents are required. [Setup guide](desktop/Guide.md#your-own-discord-application). See [NOTICE.md](NOTICE.md) for attribution and third-party notices.
 
 ## Build and verify
 
@@ -67,9 +68,9 @@ Use PowerShell 7, the .NET 8 SDK and the stable Rust toolchain with the Windows 
 ./scripts/package-desktop.ps1 -AppRoot "$PWD/.build/desktop"
 ```
 
-Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.7.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
+Build outputs stay in `.build/desktop`; portable packages go into `releases/desktop-v1.8.0`. The ZIP excludes local settings, session data, backups and verification fixtures. It includes the app, runtime, guide, licenses, attribution and SHA-256 checksums. The .NET Desktop Runtime is installed separately to keep the download small.
 
-Version 1.7.0 passed 286 Rust tests and 308 desktop checks in both same-drive and cross-drive configurations. Checks cover idle hiding, priority, terminal recovery, damaged preferences, atomic backups, failed saves, asynchronous tab changes and the actual window Close event. Every page and Settings section is checked at nine widths from 320 to 1920 logical pixels. All 40 style/theme/mode combinations are checked at 460-pixel width for layout and text/button contrast. Native mouse and keyboard checks cover dropdown selection, appearance preview, retained drafts, Ctrl+S, resizing, scrolling and field reordering. Tests use synthetic sessions and process names; no games are launched. See the [audit coverage](docs/desktop-audit.md) and [release checklist](docs/desktop-release.md) for practical limits.
+Version 1.8.0 passed 297 Rust tests and 335 desktop checks in both same-drive and cross-drive configurations. Checks cover custom Application IDs and artwork, default restoration, idle hiding, priority, terminal recovery, damaged preferences, atomic backups, failed saves, asynchronous tab changes and the actual window Close event. Every page and Settings section is checked at nine widths from 320 to 1920 logical pixels, including expanded custom application panels. All 40 style/theme/mode combinations are checked at 460-pixel width for layout and text/button contrast. Native mouse and keyboard checks cover application selection, validation and saving; earlier audit checks cover appearance previews, retained drafts, resizing, scrolling and field reordering. Tests use synthetic sessions, IDs and process names; no games are launched. A newly registered application's live connection requires its real ID. See the [audit coverage](docs/desktop-audit.md) and [release checklist](docs/desktop-release.md) for practical limits.
 
 The Rust engine and original terminal documentation remain available in [docs/index.md](docs/index.md), [CHANGELOG.md](CHANGELOG.md) and the source tree.
 

@@ -1,5 +1,17 @@
 # Desktop release notes
 
+## 1.8.0
+
+- Added Settings → Activity → Discord application with Default and Custom sources. Custom accepts a public Application ID from Discord's General Information page; no bot token, OAuth scope, intents or Administrator permission is needed.
+- Kept both built-in application IDs available. Returning to Default restores the original connection and artwork while retaining the saved custom ID and image keys.
+- Added independent custom large/small image keys and a developer portal shortcut. Empty image keys omit artwork; custom images belong to the selected application's Rich Presence Art Assets.
+- Validated IDs in desktop controls and engine configuration. Malformed IDs receive focused inline feedback and cannot replace the configuration. An invalid external edit preserves the running engine's last valid settings.
+- Applied custom IDs to CLI, VS Code and desktop activity. ID changes reconnect Discord and clear the previous asset catalog without restarting monitoring or resetting continuous time.
+- Renamed Layout's existing Codex/ChatGPT selector to Application heading to distinguish display text from the connection's Application ID. Both text layouts, visibility switches, idle hiding, game priority and background behavior are retained.
+- Migrated to schema 18 with Default selected and existing preferences preserved. Tools reads the desktop version from its assembly.
+
+Verified on Windows 11 x64: 297 Rust tests, formatting and strict lint checks; 335 desktop checks with configuration on each drive. The new application card and expanded asset/default-ID panels fit at all nine tested widths from 320 to 1920 logical pixels. Native mouse/keyboard checks cover Custom selection, an empty-ID error, Ctrl+S saving, Default restoration and retained custom values. Custom IDs use monitoring-only synthetic fixtures; a live connection and artwork for a newly created user application require its real ID. Built-in live connection and public package verification are separate release gates. Existing Windows 10 and DPI/accessibility limits remain in [audit coverage](desktop-audit.md).
+
 ## 1.7.0
 
 - Kept navigation available during requests while disabling duplicate asynchronous actions. Save, Reload and diagnostics retain the correct originating view when tabs change.

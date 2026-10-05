@@ -6,18 +6,18 @@ All data stays on the user's machine. The daemon reads Codex/OpenCode local stat
 
 Path: `~/.codex/discord-presence-config.json`
 
-Current schema version: `13`.
+Current schema version: `18`.
 
 | Owner | Fields |
 |:---|:---|
-| Identity | Shared CLI/VS Code client id, Codex App desktop client id, and asset keys |
+| Identity | Built-in CLI/VS Code and desktop IDs, plus `discord_application` with Default/Custom mode, a public custom Application ID and independent large/small asset keys. No credentials. |
 | Runtime | `presence_enabled`, poll interval, stale cutoff, active sticky window |
 | Display | `desktop_presence_design` (`codex_app` or `chat_gpt_app`), terminal logo mode/path, large/small image text, and the ordered `presence_layout` with field zone and label style |
 | Pricing | Model aliases and overrides |
 | Plan | Local plan override and preset selection. Manual tiers include `Pro 5x ($100/month)` and `Pro 20x ($200/month)`; legacy `pro` maps to Pro 20x. |
 | Privacy | Project, branch, model, activity, tokens, cost, semantic quotas, Credits, context, systems, activity target, and global private-mode flags. |
 
-Schemas 11 and 12 migrate atomically to schema 13. Existing visibility choices are preserved, Credits defaults on, and the ten fields receive a validated deterministic order. Pulse and every standalone runtime mode write and reload this same atomic file; no secondary control file or process-takeover state exists. Failed reloads preserve the last valid in-memory value.
+Older schemas migrate atomically to schema 18. Existing visibility, layout and timer choices are preserved; absent custom application settings select Default. The eleven composer fields include custom text. Explicit Custom mode requires a validated public Application ID; malformed nonempty IDs are rejected in either mode. Built-in defaults and saved valid custom settings remain independent. Every standalone runtime mode writes and reloads this same atomic file. Failed reloads preserve the last valid in-memory value.
 
 ## Session Snapshot
 

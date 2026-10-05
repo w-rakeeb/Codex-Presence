@@ -123,7 +123,9 @@ Config schema 13 stores the shared `presence_enabled` master switch, `display.de
 | `codex_app` | `Codex App` | `1478395304624652345` |
 | `chat_gpt_app` | `ChatGPT App` | `1470480085453770854` |
 
-CLI and VS Code always use the shared `1470480085453770854` identity. Pressing `D` in Ratatui toggles and saves the desktop value; Discord reconnects when the selected client id changes.
+In Default mode, CLI and VS Code use the shared `1470480085453770854` identity. Pressing `D` in Ratatui toggles and saves the desktop value; Discord reconnects when the selected client id changes.
+
+Schema 18 adds `discord_application`: `mode` (`default` or `custom`), optional public `application_id`, `large_image_key` and optional `small_image_key`. Default mode retains the original IDs and artwork. Explicit Custom mode validates a nonzero 17–20 digit unsigned 64-bit ID and uses it on every surface, with its own image keys. Missing or malformed IDs reject the complete replacement configuration; the running engine keeps its last good configuration. Changing mode preserves the saved custom values and built-in defaults. An ID change clears the IPC connection, asset catalog and retry state, then reconnects without restarting local monitoring or resetting continuous elapsed time. No bot credentials are stored or used. The desktop bridge exposes the selected ID as `discord_application_id`, including monitoring-only mode; this field describes configuration, not confirmation that Discord accepted a connection.
 
 Foreground TUI, headless, and Codex-wrapper loops reload `~/.codex/discord-presence-config.json` before every poll. Valid external edits from Pulse replace the complete runtime config together. Invalid, missing, or transiently replaced files are logged and ignored so the process keeps its last valid configuration.
 

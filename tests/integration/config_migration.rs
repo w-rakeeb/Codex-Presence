@@ -6,6 +6,67 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn custom_application_reload_preserves_last_good_id_after_invalid_external_edit() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("discord-presence-config.json");
+    let mut runtime = PresenceConfig::default();
+    let valid = serde_json::json!({"schema_version":17,"discord_application":{"mode":"custom","application_id":" 123456789012345678 ","large_image_key":"my-art","small_image_key":null},"privacy":{"show_model":false}});
+    fs::write(&path, serde_json::to_vec_pretty(&valid).unwrap()).unwrap();
+    assert!(runtime.reload_from_path(&path));
+    assert_eq!(runtime.schema_version, 18);
+    assert_eq!(
+        runtime.effective_client_id().as_deref(),
+        Some("123456789012345678")
+    );
+    assert!(!runtime.privacy.show_model);
+    let persisted: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        persisted["discord_application"]["application_id"],
+        "123456789012345678"
+    );
+    let previous = runtime.clone();
+    let mut invalid = persisted;
+    invalid["discord_application"]["application_id"] = serde_json::json!("invalid-token");
+    fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+    assert!(!runtime.reload_from_path(&path));
+    assert_eq!(runtime, previous);
+}
+
+#[test]
+fn default_custom_default_round_trip_keeps_saved_custom_assets_and_original_ids() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("discord-presence-config.json");
+    let mut value = serde_json::json!({"discord_application":{"mode":"custom","application_id":"123456789012345678","large_image_key":"my-large","small_image_key":"my-small"}});
+    let mut runtime = PresenceConfig::default();
+    for mode in ["custom", "default", "custom"] {
+        value["discord_application"]["mode"] = serde_json::json!(mode);
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(runtime.reload_from_path(&path));
+        assert_eq!(
+            runtime.effective_client_id().as_deref(),
+            Some(if mode == "custom" {
+                "123456789012345678"
+            } else {
+                DEFAULT_DISCORD_CLIENT_ID
+            })
+        );
+        assert_eq!(
+            runtime.discord_application.application_id.as_deref(),
+            Some("123456789012345678")
+        );
+        assert_eq!(runtime.discord_application.large_image_key, "my-large");
+        assert_eq!(
+            runtime.discord_client_id.as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
+        assert_eq!(
+            runtime.discord_client_id_desktop.as_deref(),
+            Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID)
+        );
+    }
+}
+
+#[test]
 fn non_codex_identity_is_rewritten_to_codex_identity() {
     let mut config = PresenceConfig {
         discord_client_id: Some("000000000000000000".to_string()),
@@ -84,7 +145,7 @@ fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() 
     };
 
     assert!(runtime.reload_from_path(&path));
-    assert_eq!(runtime.schema_version, 17);
+    assert_eq!(runtime.schema_version, 18);
     assert!(runtime.presence_enabled);
     assert!(!runtime.privacy.show_git_branch);
     assert!(runtime.privacy.show_credits);
@@ -107,7 +168,7 @@ fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() 
     let persisted: serde_json::Value =
         serde_json::from_slice(&fs::read(path).expect("read migrated config"))
             .expect("parse migrated config");
-    assert_eq!(persisted["schema_version"], 17);
+    assert_eq!(persisted["schema_version"], 18);
     assert_eq!(persisted["presence_enabled"], true);
     assert_eq!(persisted["privacy"]["show_credits"], true);
 }

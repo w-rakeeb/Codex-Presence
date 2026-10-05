@@ -1,5 +1,11 @@
 # Desktop audit — 1.7.0
 
+## 1.8.0 application configuration follow-up
+
+The custom Discord application update passed 297 Rust tests and 335 desktop checks in both same-drive and cross-drive configurations. The new controls select Default or Custom, validate a public ID, retain valid custom values when returning to Default, and apply application-specific asset keys. External malformed configuration keeps the previous valid runtime settings. Synthetic monitoring-only bridge checks verify ID reloads on the same process, both heading layouts and default restoration. New expanded artwork and built-in ID panels pass the nine-width horizontal bounds checks below.
+
+Native mouse/keyboard verification selected Custom, triggered an empty-ID inline error with focus, entered a public-format fixture ID, saved with Ctrl+S, selected Default with the mouse and saved while retaining that ID. The fixture remained unable to publish to Discord and exited through Overview. The actual custom application's live connection and artwork remain dependent on a registered ID supplied by its owner. No bot credentials or permissions are required or stored. The 1.7.0 audit and its platform limits remain applicable.
+
 Audited 2026-10-05 on Windows 11 x64. The product remains a native .NET 8 WPF dashboard with a Rust session engine and Discord IPC. It has five pages, four Settings sections, retained per-page drafts, local JSON configuration, a tray menu, host watcher and terminal handoff. It has no web routes, browser console, server database, account login, uploads, pagination or cloud storage; those parts of a web-app checklist do not apply.
 
 ## Findings and repairs

@@ -161,7 +161,15 @@ public partial class MainWindow
             foreach (var target in navigation.Keys)
             {
                 Fresh(target);
-                if (target == "Settings") foreach (var section in new[] { "Appearance", "Activity", "Background", "Advanced" }) { ShowSettingsSection(section); UpdateLayout(); VerifyFit(width, target + " / " + section); }
+                if (target == "Settings") foreach (var section in new[] { "Appearance", "Activity", "Background", "Advanced" })
+                {
+                    ShowSettingsSection(section); UpdateLayout(); VerifyFit(width, target + " / " + section);
+                    if (section == "Activity")
+                    {
+                        foreach (var expander in Elements<Expander>(PageBody).Where(item => item.Header?.ToString() is "Custom application images" or "Built-in application IDs")) expander.IsExpanded = true;
+                        UpdateLayout(); VerifyFit(width, target + " / expanded Discord application");
+                    }
+                }
                 else VerifyFit(width, target);
             }
             if (width is 320 or 375 or 1920)
