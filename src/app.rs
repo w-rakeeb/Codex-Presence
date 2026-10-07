@@ -835,6 +835,8 @@ pub fn run_desktop_bridge(
             "discord_status": if priority_held { "Priority app active · Codex presence cleared" } else if idle_hidden { "Hidden · idle timeout reached" } else if observe { "Monitoring only" } else { discord.status() },
             "discord_application_id": config.effective_client_id_for_surface(surface),
             "presence_enabled": config.presence_enabled && !observe && !priority_held && !idle_hidden,
+            "publication_enabled": config.presence_enabled,
+            "monitoring_only": observe,
             "priority_held": priority_held,
             "idle_timeout_hidden": idle_hidden,
             "idle_timeout_remaining_seconds": idle_remaining,

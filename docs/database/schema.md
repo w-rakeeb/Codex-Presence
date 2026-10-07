@@ -61,6 +61,10 @@ Path: `~/.codex/discord-presence-metrics.json`
 | `cost_breakdown.cached_input_savings_usd` | Aggregate cached-input savings |
 | `by_model[].cache_hit_ratio` | Per-model cache health |
 
+## Desktop Bridge
+
+The `desktop-bridge` line-delimited JSON snapshot keeps `schema_version: 1`. `publication_enabled` describes the saved master setting; `monitoring_only` describes the bridge's local-only mode. `presence_enabled` is the effective permission after monitoring-only, game priority and idle hiding are applied. A true effective permission is not proof that Discord accepted a connection; `discord_status` describes the current connection. These fields are independent of configuration schema 18.
+
 ## Context Windows
 
 `ContextWindowSnapshot` stores usable window, used/remaining tokens, remaining percentage, and source. GPT-5.6 has 372,000 raw inventory tokens and 353,400 usable tokens at 95% in Codex 0.144.0. Resolution order is observed JSONL, valid local `models_cache.json`, then the bundled catalog. The runtime does not invent GPT-5.6 API context, long-context thresholds, or max output values when those facts are not published.

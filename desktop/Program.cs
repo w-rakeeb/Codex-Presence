@@ -24,7 +24,8 @@ public static class Program
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         app.DispatcherUnhandledException += (_, e) =>
         {
-            MessageBox.Show(e.Exception.Message, "Codex Presence", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (app.MainWindow is MainWindow main) main.ReportError(e.Exception);
+            MessageBox.Show(UserFeedback.Describe(e.Exception), "Codex Presence", MessageBoxButton.OK, MessageBoxImage.Error);
             e.Handled = true;
         };
         var window = new MainWindow(args);

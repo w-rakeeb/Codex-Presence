@@ -1,4 +1,46 @@
-# Desktop audit — 1.7.0
+# Desktop audit
+
+## 1.9.0 responsiveness and product quality
+
+Audited 2026-10-07 on Windows 11 x64. The existing WPF/Rust architecture and all presence features are preserved; no dependency or web rewrite was added.
+
+| Finding | Repair |
+|---|---|
+| Collapsed sessions constructed and refreshed hidden controls | Twelve initial headers, incremental Show more, expansion-time details and suspended collapsed updates |
+| Settings built every section on entry | Each section builds on its first visit and retains its controls and draft |
+| File hashes, backups, replacement and preferences blocked the UI thread | Worker-thread transactions, serialized reads/writes and captured destination paths |
+| Unknown speed appeared as Standard; malformed numeric values appeared as zero | Explicit unknown/Fast/Standard mapping and unavailable numeric states |
+| External publication edits left Pause / Resume stale | Separate bridge publication and monitoring-only fields; temporary suppression remains independent |
+| Technical failures appeared in the main interface; host checks could fault unobserved | Actionable recovery text, retained Tools diagnostics and handled watcher failures |
+| Cancel moved focus to navigation; input boundaries were faint | Focus restoration, named decision, consistent control sizes/states and 3:1 input-boundary contrast |
+| Retained dashboard artwork and quota bars kept old appearance resources | Dynamic icon geometry, stroke, background, radius and meter brushes |
+| Changing numeric widths introduced visual movement | Tabular numeric text in live values |
+
+### Measured performance
+
+The opt-in `scripts/verify-desktop.ps1 -Profile` measurement uses a synthetic 100-session snapshot, a 540-pixel WPF window and a warmed operation before each group of repetitions. It measures UI-thread execution including layout and UI-thread allocation, not network latency or browser INP. Dashboard construction is repeated five times, updates thirty times and fresh Settings construction ten times. Settings measures the Advanced section retained from the preceding verification flow. Version 1.9 initially shows twelve sessions; Show more exposes all hundred without replacing existing rows. The runtime still processes the complete snapshot.
+
+| Median operation | 1.8.0 baseline | 1.9.0 |
+|---|---:|---:|
+| Construct dashboard for 100 sessions | 387.5 ms | 49.9 ms |
+| Refresh dashboard values | 6.79 ms | 0.55 ms |
+| Construct fresh Settings section | 200.2 ms | 34.0 ms |
+| Dashboard construction allocation | 20.27 MB | 3.44 MB |
+
+These are local sample measurements on the development PC, not guaranteed timings on other hardware. The final 1.9 sample had p95 values of 51.0 ms, 1.32 ms and 35.1 ms respectively. Raw baseline and after evidence stays in the private verification folder. The profiler is absent from normal operation and adds no telemetry.
+
+### Verification
+
+- 297 Rust tests, format checks and all-feature Clippy with warnings denied; a warning-free .NET Release build.
+- 366 desktop checks with configuration on C: or D: and the application/backup on D:. These include all hundred sessions, retained controls, collapsed update suspension, independent full-data expansion, malformed/unknown telemetry, external publication changes during monitoring-only operation, readable errors, theme resources and focus restoration.
+- All five pages and all four Settings sections at nine widths from 320 to 1920 logical pixels, including expanded application panels; scrolling and save/status controls at the minimum 320 × 420 size.
+- Forty style/palette/mode combinations with secondary-text and primary-button contrast at least 4.5:1; all eight palette/mode input boundaries at least 3:1 against canvas, control and surface backgrounds.
+- Existing atomic-backup, locked-file, damaged-preference, duplicate-action, asynchronous-draft, idle, priority, application-ID and original-terminal checks remain in the suite.
+- Native mouse/keyboard checks selected Soft, selected Light with arrow keys and Enter, returned to the same draft after Ctrl+3 / Ctrl+4, and saved with Ctrl+S. A 24-session monitoring-only fixture expanded/collapsed details and loaded the remaining twelve through Show more. Scrollbar rail paging, a 320-pixel window and clean Exit were exercised. No fixture activity was published.
+
+The practical limits below still apply. The interface intentionally avoids page fades, popup animations and repeating meter animations, so motion does not delay interaction or disregard reduced-motion preferences.
+
+## Earlier audit: 1.7.0 and 1.8.0
 
 ## 1.8.0 application configuration follow-up
 

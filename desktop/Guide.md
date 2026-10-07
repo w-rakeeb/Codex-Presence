@@ -16,13 +16,15 @@ The compact Windows x64 build requires Microsoft's [.NET 8 Desktop Runtime x64](
 - **Exit:** clear the activity, stop the owned engine and exit the app.
 - **Discord preview:** the actual text produced by the original engine's compositor. Discord controls its final profile layout and may take a few seconds to refresh.
 - **Session usage:** total tokens, known cost, input/cached/output tokens, cache ratio, plan and speed.
-- **Active sessions:** project, model, effort, activity, branch, context and cost. Expand the complete session data for source, timing, policies and provenance.
+- **Active sessions:** project, model, effort, activity, branch, context and cost. The first twelve sessions appear immediately; **Show more sessions** adds the next twelve. Expand a session to load its details, or its complete data for source, timing, policies and provenance.
 - **Limits and credits:** observed usage, reset times and credit balance; expand for every reported quota field.
 - **Metrics:** full cost breakdown, model totals and pricing coverage.
 
 Version 1.4 keeps tabs usable while settings are unsaved. Each edited tab retains its controls, values and scroll position; a dot marks unsaved changes. Saving a tab merges only its changes, preserving settings already saved elsewhere. Dropdowns use WPF's required popup and keyboard hooks. Page fades and repeatedly allocated progress animations are removed. Snapshot parsing and Discord image lookup run away from the UI thread; a hidden dashboard suspends rendering. Discord controls the font and appearance inside its own activity card.
 
 Costs are estimates from available telemetry and configured rates. Missing costs remain unavailable; partial known amounts stay marked partial. A plan label does not grant or change account access. Statistics are scoped to sessions observed by this engine, not a complete account billing history.
+
+Unknown speed, context and numeric values remain **Unavailable** rather than being displayed as Standard or zero. A connection error shows reconnect guidance; the engine retries automatically. Open **Tools** for technical diagnostics. Pause reflects the saved publication setting, including external changes; temporary game priority, idle hiding and monitoring-only mode remain separate.
 
 ## Privacy
 
@@ -133,7 +135,7 @@ Stop the desktop engine before manually starting `terminal-view`; it rejects dup
 
 If another application edits the shared configuration, saving is rejected to preserve its edits. Click Reload, reapply your choices, and save. To restore a backup, exit the app first, copy the desired backup over `discord-presence-config.json`, and reopen. Do not replace Codex authentication files.
 
-Backups can be on another drive from configuration. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Desktop preferences also use atomic replacement and exact backups under `Data/Backups/Preferences`. Damaged desktop preferences open with safe defaults and a warning, preserving the original file. Unchanged settings do not create extra backups. Version 1.8.0 uses schema 18; migration selects Default and preserves existing presence preferences. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
+Backups can be on another drive from configuration. File validation, backup and replacement run away from the UI thread. The app copies the previous file to its backup folder first, then atomically replaces configuration using a same-directory temporary file. Desktop preferences also use atomic replacement and exact backups under `Data/Backups/Preferences`. Damaged desktop preferences open with safe defaults and a warning, preserving the original file; technical details stay in Tools. Unchanged settings do not create extra backups. Version 1.9.0 retains schema 18 and existing presence preferences. Preserve your previous app/runtime and compatible configuration before replacing an installed version; do not overwrite a running executable.
 
 ## Your own Discord application
 

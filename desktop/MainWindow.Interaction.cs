@@ -14,6 +14,22 @@ namespace CodexPresence;
 
 public partial class MainWindow
 {
+    private IInputElement? focusBeforeDecision;
+
+    private void NavigateFromKeyboard(string target)
+    {
+        Navigate(target);
+        navigation[target].Focus();
+    }
+
+    public void ReportError(Exception error)
+    {
+        Footer.Text = UserFeedback.Describe(error);
+        logs.Add(error.ToString());
+        if (logs.Count > 150) logs.RemoveAt(0);
+        if (diagnostics != null && page == "Tools") diagnostics.Text = string.Join(Environment.NewLine, logs);
+    }
+
     private void UpdateActionAvailability()
     {
         foreach (var button in Elements<Button>(this).Where(button => button.Tag is string tag && tag == "AsyncAction")) button.IsEnabled = !busy;
@@ -114,9 +130,9 @@ public partial class MainWindow
         var startupChanged = false;
         try
         {
-            pending.Save(preferenceRoot);
+            await Task.Run(() => pending.Save(preferenceRoot));
             saved = true;
-            if (!testMode) { pending.ApplyStartup(); startupChanged = true; }
+            if (!testMode) { await Task.Run(pending.ApplyStartup); startupChanged = true; }
             if (restart) await backend.Stop();
             backend.Options = pending;
             await backend.LoadConfig();
@@ -129,8 +145,8 @@ public partial class MainWindow
             backend.Options = previous;
             try
             {
-                if (saved) previous.Save(preferenceRoot);
-                if (startupChanged) previous.ApplyStartup();
+                if (saved) await Task.Run(() => previous.Save(preferenceRoot));
+                if (startupChanged) await Task.Run(previous.ApplyStartup);
                 await backend.LoadConfig();
                 Appearance.Apply(this, previous);
                 ApplyDesktopPreferences();
@@ -156,7 +172,7 @@ public partial class MainWindow
         var index = parent.Children.IndexOf(box);
         parent.Children.Insert(index + 1, feedback);
         box.Tag = feedback;
-        box.TextChanged += (_, _) => { feedback.Visibility = Visibility.Collapsed; box.SetResourceReference(BorderBrushProperty, "Line"); AutomationProperties.SetHelpText(box, ""); };
+        box.TextChanged += (_, _) => { feedback.Visibility = Visibility.Collapsed; box.SetResourceReference(BorderBrushProperty, "InputLine"); AutomationProperties.SetHelpText(box, ""); };
     }
 
     private void RejectField(TextBox box, string message, string? section = null)
@@ -167,13 +183,14 @@ public partial class MainWindow
         AutomationProperties.SetHelpText(box, message);
         box.BringIntoView();
         box.Focus();
-        throw new InvalidOperationException(message);
+        throw new UserActionException(message);
     }
 
     private void ShowExitDecision()
     {
         ShowDashboard();
         if (DecisionPanel.Visibility == Visibility.Visible) return;
+        focusBeforeDecision = Keyboard.FocusedElement;
         DecisionBody.Children.Clear();
         DecisionBody.Children.Add(Text("Unsaved changes", 20));
         var detail = Text("Review your changes before closing, or exit without saving them.", 13, Muted);
@@ -201,6 +218,8 @@ public partial class MainWindow
     {
         DecisionPanel.Visibility = Visibility.Collapsed;
         MainContent.IsEnabled = true;
-        navigation[page].Focus();
+        if (focusBeforeDecision is UIElement { IsVisible: true, IsEnabled: true } previous) Keyboard.Focus(previous);
+        else navigation[page].Focus();
+        focusBeforeDecision = null;
     }
 }

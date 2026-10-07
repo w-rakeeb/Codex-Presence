@@ -47,6 +47,20 @@ public static class Appearance
         var error = new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? "#B91C1C" : "#FCA5A5"));
         error.Freeze();
         window.Resources["Error"] = error;
+        var input = new SolidColorBrush((Color)ColorConverter.ConvertFromString(preferences.ColorTheme switch
+        {
+            "slate" => light ? "#667B97" : "#7C8DA3",
+            "forest" => light ? "#6F8475" : "#7E9B85",
+            "dusk" => light ? "#8D7898" : "#9B84AB",
+            _ => light ? "#767676" : "#808080"
+        }));
+        input.Freeze();
+        window.Resources["InputLine"] = input;
+        window.Resources["Pressed"] = window.Resources["Selection"];
+        window.Resources["ControlHeight"] = 36d;
+        window.Resources["BodySize"] = 14d;
+        window.Resources["LabelSize"] = 13d;
+        window.Resources["CodeFont"] = new FontFamily("Cascadia Mono, Consolas");
         var soft = preferences.InterfaceStyle == "soft";
         var chat = preferences.InterfaceStyle == "chatgpt";
         var paper = preferences.InterfaceStyle == "paper";

@@ -40,8 +40,12 @@ public sealed class Preferences
     public static Preferences Load(string root) => Load(root, out _);
 
     public static Preferences Load(string root, out string? warning)
+        => Load(root, out warning, out _);
+
+    public static Preferences Load(string root, out string? warning, out string? diagnostic)
     {
         warning = null;
+        diagnostic = null;
         var path = Path.Combine(root, "Data", "app-settings.json");
         try
         {
@@ -60,7 +64,8 @@ public sealed class Preferences
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            warning = "Could not read desktop settings. Safe defaults are active; the original file is unchanged. Review Settings or restore a backup. " + error.Message;
+            warning = "Could not read desktop settings. Safe defaults are active; the original file is unchanged. Review Settings or restore a backup.";
+            diagnostic = error.ToString();
             return new Preferences();
         }
     }
@@ -110,6 +115,7 @@ public sealed class Backend
     public string ConfigPath => Path.Combine(Options.CodexHome, "discord-presence-config.json");
     public string BackupDirectory { get; }
     public bool Running => process is { HasExited: false };
+    public bool Starting { get; private set; }
     public int? ProcessId => Running ? process!.Id : null;
     public JsonObject? Config { get; private set; }
     public JsonObject? Snapshot => Volatile.Read(ref snapshot);
@@ -123,6 +129,8 @@ public sealed class Backend
     private JsonObject? snapshot;
     private Task? completion;
     private string? baseHash;
+    private JsonObject? snapshotAtConfigRead;
+    public bool PublicationEnabled => !ReferenceEquals(snapshotAtConfigRead, Snapshot) && Snapshot?["publication_enabled"] is JsonValue current && current.TryGetValue<bool>(out var enabled) ? enabled : Config?["presence_enabled"] is JsonValue saved && saved.TryGetValue<bool>(out var setting) && setting;
     private readonly SemaphoreSlim writes = new(1, 1);
 
     public Backend(string root, Preferences options, bool verification = false) { Root = root; Options = options; BackupDirectory = Path.Combine(root, "Data", verification ? "Verification\\Backups" : "Backups"); }
@@ -151,7 +159,11 @@ public sealed class Backend
         return info;
     }
 
-    public Task<string> Command(string arguments, string? input = null) => RunCommand(CreateStartInfo(arguments), input, TimeSpan.FromSeconds(30));
+    public Task<string> Command(string arguments, string? input = null)
+    {
+        var start = CreateStartInfo(arguments);
+        return Task.Run(() => RunCommand(start, input, TimeSpan.FromSeconds(30)));
+    }
 
     internal static async Task<string> RunCommand(ProcessStartInfo start, string? input, TimeSpan limit)
     {
@@ -188,16 +200,23 @@ public sealed class Backend
         return info;
     }
 
-    private string? HashFile() => File.Exists(ConfigPath) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(ConfigPath))) : null;
+    private static string? HashFile(string path) => File.Exists(path) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) : null;
 
     public async Task LoadConfig()
     {
-        var before = await Task.Run(HashFile);
-        var value = JsonNode.Parse(await Command("config-get"))!.AsObject();
-        var after = await Task.Run(HashFile);
-        if (before != after) throw new IOException("Settings changed while loading. Reload and try again.");
-        Config = value;
-        baseHash = after;
+        await writes.WaitAsync();
+        try
+        {
+            var path = ConfigPath;
+            var before = await Task.Run(() => HashFile(path));
+            var value = JsonNode.Parse(await Command("config-get"))!.AsObject();
+            var after = await Task.Run(() => HashFile(path));
+            if (path != ConfigPath || before != after) throw new IOException("Settings changed while loading. Reload and try again.");
+            Config = value;
+            baseHash = after;
+            snapshotAtConfigRead = Snapshot;
+        }
+        finally { writes.Release(); }
     }
 
     public async Task SaveConfig(JsonObject value)
@@ -205,31 +224,36 @@ public sealed class Backend
         await writes.WaitAsync();
         try
         {
+            var path = ConfigPath;
+            var expectedHash = baseHash;
             var validated = JsonNode.Parse(await Command("config-check", value.ToJsonString()))!.AsObject();
-            if (HashFile() != baseHash) throw new IOException("Another app changed these settings. Reload before saving so its changes are preserved.");
-            if (File.Exists(ConfigPath) && JsonNode.DeepEquals(JsonNode.Parse(await File.ReadAllTextAsync(ConfigPath)), validated))
+            if (path != ConfigPath) throw new IOException("Settings changed while loading. Reload and try again.");
+            var savedHash = await Task.Run(() =>
             {
-                Config = validated;
-                return;
-            }
-            Directory.CreateDirectory(Options.CodexHome);
-            Directory.CreateDirectory(BackupDirectory);
-            var temporary = ConfigPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try
-            {
-                await File.WriteAllTextAsync(temporary, validated.ToJsonString(JsonOptions), new UTF8Encoding(false));
-                if (File.Exists(ConfigPath))
+                if (HashFile(path) != expectedHash) throw new IOException("Another app changed these settings. Reload before saving so its changes are preserved.");
+                if (File.Exists(path) && JsonNode.DeepEquals(JsonNode.Parse(File.ReadAllText(path)), validated)) return expectedHash;
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                Directory.CreateDirectory(BackupDirectory);
+                var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
                 {
-                    var backup = Path.Combine(BackupDirectory, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json");
-                    File.Copy(ConfigPath, backup);
-                    if (HashFile() != baseHash) throw new IOException("Another app changed these settings during the backup. Reload and try again.");
-                    File.Replace(temporary, ConfigPath, null);
+                    File.WriteAllText(temporary, validated.ToJsonString(JsonOptions), new UTF8Encoding(false));
+                    if (File.Exists(path))
+                    {
+                        var backup = Path.Combine(BackupDirectory, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json");
+                        File.Copy(path, backup);
+                        if (HashFile(path) != expectedHash) throw new IOException("Another app changed these settings during the backup. Reload and try again.");
+                        File.Replace(temporary, path, null);
+                    }
+                    else File.Move(temporary, path);
                 }
-                else File.Move(temporary, ConfigPath);
-            }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
-            baseHash = HashFile();
+                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                return HashFile(path);
+            });
+            if (path != ConfigPath) throw new IOException("Settings changed while loading. Reload and try again.");
+            baseHash = savedHash;
             Config = validated;
+            snapshotAtConfigRead = Snapshot;
         }
         finally { writes.Release(); }
     }
@@ -250,8 +274,10 @@ public sealed class Backend
         var snapshots = Task.Run(() => ReadSnapshots(child, ready));
         var errors = Task.Run(() => ReadErrors(child));
         completion = CompleteProcess(child, snapshots, errors, ready);
+        Starting = true;
         try { await ready.Task.WaitAsync(TimeSpan.FromSeconds(30)); }
         catch (TimeoutException) { throw new IOException("The engine is still scanning sessions. Check Tools for progress, or stop it and try again."); }
+        finally { Starting = false; }
     }
 
     public async Task SetPriorityHold(bool held)

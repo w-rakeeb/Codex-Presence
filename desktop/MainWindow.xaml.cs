@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -51,9 +52,10 @@ public partial class MainWindow : Window
     private JsonObject? draft;
     private JsonObject? draftBase;
     private readonly Dictionary<string, EditorPage> editors = new();
-    private sealed record EditorPage(JsonObject Base, JsonObject Draft, UIElement[] Content, UIElement? Save, Action[] Collect, Func<Task>? Additional, Action? Preview, double Offset, bool Dirty);
+    private sealed record EditorPage(JsonObject Base, JsonObject Draft, UIElement[] Content, UIElement? Save, Action[] Collect, Action? Finalize, Func<Task>? Additional, Action? Preview, double Offset, bool Dirty);
     private TextBox? diagnostics;
     private readonly List<Action> collectValues = new();
+    private Action? finalizeDraft;
     private Func<Task>? saveAdditional;
     private readonly List<Action<JsonObject?>> overviewUpdates = new();
     private readonly DispatcherTimer refreshTimer;
@@ -81,7 +83,9 @@ public partial class MainWindow : Window
         args = arguments;
         testMode = args.Contains("--self-test") || args.Contains("--test-home");
         InitializeComponent();
-        var options = testMode ? new Preferences() : Preferences.Load(root, out startupWarning);
+        string? preferenceDiagnostic = null;
+        var options = testMode ? new Preferences() : Preferences.Load(root, out startupWarning, out preferenceDiagnostic);
+        if (preferenceDiagnostic != null) logs.Add(preferenceDiagnostic);
         if (testMode)
         {
             var index = Array.IndexOf(args, "--test-home");
@@ -138,12 +142,12 @@ public partial class MainWindow : Window
             logs.Add(line);
             if (logs.Count > 150) logs.RemoveAt(0);
             if (diagnostics != null && page == "Tools") diagnostics.Text = string.Join(Environment.NewLine, logs);
-            if (line.Contains("error", StringComparison.OrdinalIgnoreCase)) Footer.Text = line;
+            if (line.Contains("error", StringComparison.OrdinalIgnoreCase)) Footer.Text = "The engine reported an issue. See Tools for details.";
         });
         backend.Exited += () => Dispatcher.BeginInvoke(() =>
         {
             if (page == "Overview" && IsVisible) RenderOverview();
-            if (backend.LastError != null) Footer.Text = backend.LastError;
+            if (backend.LastError != null) Footer.Text = "The engine stopped unexpectedly. See Tools for details, then try Start presence.";
         });
         Closing += OnClosing;
         PreviewKeyDown += (_, e) =>
@@ -158,9 +162,9 @@ public partial class MainWindow : Window
             else if (e.Key == Key.Tab)
             {
                 var names = navigation.Keys.ToArray(); var step = (Keyboard.Modifiers & ModifierKeys.Shift) == 0 ? 1 : -1;
-                Navigate(names[(Array.IndexOf(names, page) + step + names.Length) % names.Length]); e.Handled = true;
+                NavigateFromKeyboard(names[(Array.IndexOf(names, page) + step + names.Length) % names.Length]); e.Handled = true;
             }
-            else if (e.Key >= Key.D1 && e.Key <= Key.D5) { Navigate(navigation.Keys.ElementAt(e.Key - Key.D1)); e.Handled = true; }
+            else if (e.Key >= Key.D1 && e.Key <= Key.D5) { NavigateFromKeyboard(navigation.Keys.ElementAt(e.Key - Key.D1)); e.Handled = true; }
         };
     }
 
@@ -193,9 +197,8 @@ public partial class MainWindow : Window
         try { await action(); }
         catch (Exception error)
         {
-            Footer.Text = error.Message;
-            logs.Add(error.Message);
-            if (!initialized && !args.Contains("--self-test")) RenderStartupFailure(error.Message);
+            ReportError(error);
+            if (!initialized && !args.Contains("--self-test")) RenderStartupFailure(UserFeedback.Describe(error));
             else if (!IsVisible && !args.Contains("--self-test")) ShowDashboard();
             if (args.Contains("--self-test"))
             {
@@ -216,7 +219,7 @@ public partial class MainWindow : Window
     {
         if (draft != null && draftBase != null && page != "Overview")
         {
-            editors[page] = new EditorPage(draftBase, draft, PageBody.Children.Cast<UIElement>().ToArray(), SaveHost.Child, collectValues.ToArray(), saveAdditional, previewAppearance, PageScroll.VerticalOffset, dirty);
+            editors[page] = new EditorPage(draftBase, draft, PageBody.Children.Cast<UIElement>().ToArray(), SaveHost.Child, collectValues.ToArray(), finalizeDraft, saveAdditional, previewAppearance, PageScroll.VerticalOffset, dirty);
         }
         else editors.Remove(page);
         dirty = false;
@@ -230,6 +233,7 @@ public partial class MainWindow : Window
         SaveHost.Child = null;
         SaveHost.Visibility = Visibility.Collapsed;
         collectValues.Clear();
+        finalizeDraft = null;
         saveAdditional = null;
         previewAppearance = null;
         diagnostics = null;
@@ -246,7 +250,7 @@ public partial class MainWindow : Window
         {
             draft = retained.Draft; draftBase = retained.Base;
             foreach (var element in retained.Content) PageBody.Children.Add(element);
-            collectValues.AddRange(retained.Collect); saveAdditional = retained.Additional; previewAppearance = retained.Preview;
+            collectValues.AddRange(retained.Collect); finalizeDraft = retained.Finalize; saveAdditional = retained.Additional; previewAppearance = retained.Preview;
             diagnostics = Elements<TextBox>(PageBody).FirstOrDefault(box => AutomationProperties.GetName(box) == "Diagnostics output");
             SaveHost.Child = retained.Save; SaveHost.Visibility = retained.Save == null ? Visibility.Collapsed : Visibility.Visible;
             dirty = retained.Dirty;
@@ -301,17 +305,20 @@ public partial class MainWindow : Window
         }
     }
     private static string S(JsonNode? node, string fallback = "Unavailable") => node == null ? fallback : node is JsonValue value && value.TryGetValue<string>(out var text) ? text : node.ToJsonString();
-    private static double N(JsonNode? node) => node is JsonValue value && (value.TryGetValue<double>(out var number) || double.TryParse(value.ToJsonString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number)) ? number : 0;
+    private static double N(JsonNode? node) => Number(node) ?? 0;
+    private static double? Number(JsonNode? node) => node is JsonValue value && (value.TryGetValue<double>(out var number) || double.TryParse(value.ToJsonString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number)) && double.IsFinite(number) ? number : null;
     private static bool B(JsonNode? node) => node is JsonValue value && value.TryGetValue<bool>(out var result) && result;
     private static string Label(string text) => CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text.Replace('_', ' ')).Replace("Usd", "USD").Replace("Wsl", "WSL").Replace("Ai", "AI");
-    private static string Count(JsonNode? node) => node == null ? "—" : N(node).ToString("N0");
-    private static string Cost(JsonNode? amount, JsonNode? status) => amount == null ? "Unavailable" : "$" + N(amount).ToString("F2", CultureInfo.InvariantCulture) + (S(status) == "partial" ? " · partial" : "");
+    private static string Count(JsonNode? node) => Number(node) is { } number ? number.ToString("N0") : "—";
+    private static string Percent(JsonNode? node) => Number(node) is { } number ? Math.Clamp(number, 0, 100).ToString("F1") + "%" : "Unavailable";
+    private static string Speed(JsonNode? node) => S(node) switch { "On" => "Fast", "Off" => "Standard", _ => "Unavailable" };
+    private static string Cost(JsonNode? amount, JsonNode? status) => Number(amount) is not { } number ? "Unavailable" : "$" + number.ToString("F2", CultureInfo.InvariantCulture) + (S(status) == "partial" ? " · partial" : "");
 
     private Button ActionButton(string title, Action action)
     {
         var button = new Button { Content = title };
         AutomationProperties.SetName(button, title);
-        button.Click += (_, _) => { try { action(); } catch (Exception error) { Footer.Text = error.Message; logs.Add(error.Message); } };
+        button.Click += (_, _) => { try { action(); } catch (Exception error) { ReportError(error); } };
         return button;
     }
 
@@ -350,12 +357,14 @@ public partial class MainWindow : Window
     {
         var panel = Card(title, description);
         ((Border)panel.Parent).Tag = section;
+        ((Border)panel.Parent).Visibility = section == settingsSection ? Visibility.Visible : Visibility.Collapsed;
         return panel;
     }
 
     private void ShowSettingsSection(string section, bool scroll = true)
     {
         settingsSection = section;
+        if (PageBody.Children.OfType<System.Windows.Controls.Primitives.UniformGrid>().FirstOrDefault()?.Tag is Action<string> build) build(section);
         foreach (var card in PageBody.Children.OfType<Border>().Where(card => card.Tag is string)) card.Visibility = (string)card.Tag == section ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in PageBody.Children.OfType<Panel>().SelectMany(panel => panel.Children.OfType<Button>()).Where(button => button.Tag is string))
         {
@@ -422,11 +431,15 @@ public partial class MainWindow : Window
             var exit = AsyncButton("Exit", ExitApp); exit.Margin = new Thickness(0, 0, 0, 6); controls.Children.Add(exit);
             PageBody.Children.Add(controls);
             var preview = Card("DISCORD PRESENCE");
-            preview.Children.Add(LiveText(s => backend.Running ? S(s?["discord_status"], "Starting…") : backend.LastError ?? "Stopped · click Start presence to connect", 11, Muted));
-            preview.Children.Add(LiveText(s => backend.Running && s?["idle_timeout_remaining_seconds"] != null && N(s["idle_timeout_remaining_seconds"]) > 0 && !B(s["priority_held"]) ? "Inactive · hides in " + TimeSpan.FromSeconds(N(s["idle_timeout_remaining_seconds"])).ToString(@"hh\:mm\:ss") : "", 11, Muted));
+            preview.Children.Add(LiveText(ConnectionStatus, 13, Muted));
+            preview.Children.Add(LiveText(s => backend.Running && Number(s?["idle_timeout_remaining_seconds"]) is > 0 and var remaining && !B(s?["priority_held"]) ? "Inactive · hides in " + TimeSpan.FromSeconds(Math.Min(remaining, 86400)).ToString(@"hh\:mm\:ss") : "", 13, Muted));
             var horizontal = new Grid { Margin = new Thickness(0, 14, 0, 0) };
             horizontal.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) }); horizontal.ColumnDefinitions.Add(new ColumnDefinition());
-            horizontal.Children.Add(new Border { Width = 40, Height = 40, Background = (Brush)FindResource("Control"), BorderBrush = (Brush)FindResource("Line"), BorderThickness = new Thickness(1), CornerRadius = (CornerRadius)FindResource("InputRadius"), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Left, Child = new System.Windows.Shapes.Path { Data = (Geometry)FindResource("BrandIcon"), Stroke = Foreground, StrokeThickness = 1.6, Width = 22, Height = 22, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
+            var icon = new System.Windows.Shapes.Path { StrokeThickness = 1.6, Width = 22, Height = 22, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            icon.SetResourceReference(System.Windows.Shapes.Path.DataProperty, "BrandIcon"); icon.SetResourceReference(System.Windows.Shapes.Path.StrokeProperty, "Text");
+            var iconBox = new Border { Width = 40, Height = 40, BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
+            iconBox.SetResourceReference(Border.BackgroundProperty, "Control"); iconBox.SetResourceReference(Border.BorderBrushProperty, "Line"); iconBox.SetResourceReference(Border.CornerRadiusProperty, "InputRadius");
+            horizontal.Children.Add(iconBox);
             var lines = new StackPanel(); Grid.SetColumn(lines, 1);
             var title = LiveText(s => S(s?["preview"]?["app_name"], "Codex App"), 15); title.FontWeight = FontWeights.SemiBold; lines.Children.Add(title);
             lines.Children.Add(LiveText(s => S(s?["preview"]?["details"], "Waiting for a session"), 12));
@@ -435,45 +448,58 @@ public partial class MainWindow : Window
             LiveRow(usage, "Tokens", s => Count(s?["metrics"]?["totals"]?["total_tokens"]));
             LiveRow(usage, "Known cost", s => Cost(s?["metrics"]?["totals"]?["known_cost_usd"], s?["metrics"]?["totals"]?["pricing_status"]));
             LiveRow(usage, "Input / cached / output", s => Count(s?["metrics"]?["totals"]?["input_tokens"]) + " / " + Count(s?["metrics"]?["totals"]?["cached_input_tokens"]) + " / " + Count(s?["metrics"]?["totals"]?["output_tokens"]));
-            LiveRow(usage, "Cache hit", s => s?["metrics"] == null ? "—" : (N(s["metrics"]?["totals"]?["cache_hit_ratio"]) * 100).ToString("F1") + "%");
+            LiveRow(usage, "Cache hit", s => Number(s?["metrics"]?["totals"]?["cache_hit_ratio"]) is { } ratio ? Math.Clamp(ratio * 100, 0, 100).ToString("F1") + "%" : "Unavailable");
             LiveRow(usage, "Plan", s => S(s?["plan"]));
-            LiveRow(usage, "Speed", s => s?["speed"] == null ? "Unavailable" : S(s["speed"]) == "On" ? "Fast" : "Standard");
+            LiveRow(usage, "Speed", s => Speed(s?["speed"]));
             usage.Children.Add(LiveJsonViewer("Plan and speed details", s => new JsonObject { ["plan"] = s?["plan_details"]?.DeepClone(), ["speed"] = s?["service_tier"]?.DeepClone() }));
             var sessionCard = Card("ACTIVE SESSIONS");
-            if (sessions == null || sessions.Count == 0) sessionCard.Children.Add(Text("No recent session detected.", 12, Muted));
-            else for (var i = 0; i < sessions.Count; i++)
+            if (sessions == null || sessions.Count == 0) sessionCard.Children.Add(LiveText(_ => backend.Starting ? "Reading Codex sessions…" : "No recent session. Open a Codex chat to see its activity here.", 13, Muted));
+            else
             {
-                var index = i;
-                JsonNode? Session(JsonObject? s) => s?["sessions"]?[index];
-                var detail = new StackPanel();
-                LiveRow(detail, "Chat title / project", s => S(Session(s)?["project_name"]));
-                LiveRow(detail, "Model / effort", s => S(Session(s)?["model"]) + " / " + S(Session(s)?["reasoning_effort"], "—"));
-                LiveRow(detail, "Activity", s => Label(S(Session(s)?["activity"]?["kind"], "idle")) + " " + S(Session(s)?["activity"]?["target"], ""));
-                LiveRow(detail, "Branch", s => S(Session(s)?["git_branch"], "—"));
-                LiveRow(detail, "Context remaining", s => Session(s)?["context_window"] == null ? "Unavailable" : N(Session(s)?["context_window"]?["remaining_percent"]).ToString("F1") + "%");
-                LiveRow(detail, "Cost", s => Cost(Session(s)?["known_cost_usd"], Session(s)?["pricing_status"]));
-                detail.Children.Add(LiveJsonViewer("All session data", Session));
-                var id = "session:" + S(sessions[i]?["session_id"]);
-                var expander = new Expander { Content = detail, IsExpanded = expanded.TryGetValue(id, out var open) ? open : sessions.Count == 1 };
-                overviewUpdates.Add(s => expander.Header = S(Session(s)?["project_name"]) + (S(Session(s)?["session_id"]) == S(s?["active_session_id"]) ? "  · selected" : ""));
-                expander.Expanded += (_, _) => expanded[id] = true; expander.Collapsed += (_, _) => expanded[id] = false;
-                sessionCard.Children.Add(expander);
+                var list = new StackPanel(); sessionCard.Children.Add(list);
+                var shown = 0;
+                var count = Text("", 13, Muted);
+                Button? more = null;
+                void AppendSessions()
+                {
+                    var until = Math.Min(shown + 12, sessions.Count);
+                    var latest = displayedSnapshot ?? snapshot;
+                    for (; shown < until; shown++)
+                    {
+                        var index = shown;
+                        JsonNode? Session(JsonObject? s) => s?["sessions"]?[index];
+                        var id = "session:" + S(sessions[index]?["session_id"]);
+                        list.Children.Add(LiveSession(id, sessions.Count == 1, latest, Session));
+                    }
+                    count.Text = "Showing " + shown + " of " + sessions.Count + " sessions";
+                    if (more != null) more.Visibility = shown < sessions.Count ? Visibility.Visible : Visibility.Collapsed;
+                }
+                AppendSessions();
+                if (sessions.Count > 12)
+                {
+                    count.Margin = new Thickness(0, 8, 0, 8); sessionCard.Children.Add(count);
+                    more = ActionButton("Show more sessions", () => { var firstNew = shown; AppendSessions(); foreach (var update in overviewUpdates) update(displayedSnapshot ?? backend.Snapshot); if (more!.Visibility == Visibility.Collapsed) list.Children[firstNew].MoveFocus(new TraversalRequest(FocusNavigationDirection.First)); });
+                    more.HorizontalAlignment = HorizontalAlignment.Left; sessionCard.Children.Add(more);
+                    AutomationProperties.SetLiveSetting(count, AutomationLiveSetting.Polite);
+                }
             }
             var limits = Card("LIMITS & CREDITS");
             LiveRow(limits, "Source", s => S(s?["limits_source"]?["label"]));
             if (windows == null || windows.Count == 0) limits.Children.Add(Text("No quota windows reported.", 11, Muted));
             else for (var i = 0; i < windows.Count; i++)
-            {
-                var index = i;
-                JsonNode? Window(JsonObject? s) => s?["limits"]?["windows"]?[index];
-                var minutes = N(windows[i]?["window_minutes"]);
-                var name = minutes >= 1440 && minutes % 1440 == 0 ? (minutes / 1440) + " day" : minutes >= 60 && minutes % 60 == 0 ? (minutes / 60) + " hour" : minutes + " minute";
-                LiveRow(limits, name + " quota", s => N(Window(s)?["used_percent"]).ToString("F1") + "% used · " + N(Window(s)?["remaining_percent"]).ToString("F1") + "% remaining");
-                var progress = new ProgressBar { Maximum = 100, Height = 3, Foreground = Accent, Background = (Brush)FindResource("Line"), BorderThickness = new Thickness(0), Margin = new Thickness(0, 4, 0, 6) };
-                overviewUpdates.Add(s => { var next = Math.Clamp(N(Window(s)?["used_percent"]), 0, 100); if (progress.Value != next) progress.Value = next; });
-                limits.Children.Add(progress);
-                LiveRow(limits, "Resets", s => ResetTime(Window(s)?["resets_at"]));
-            }
+                {
+                    var index = i;
+                    JsonNode? Window(JsonObject? s) => s?["limits"]?["windows"]?[index];
+                    var minutes = N(windows[i]?["window_minutes"]);
+                    var name = minutes >= 1440 && minutes % 1440 == 0 ? (minutes / 1440) + " day" : minutes >= 60 && minutes % 60 == 0 ? (minutes / 60) + " hour" : minutes + " minute";
+                    LiveRow(limits, name + " quota", s => Percent(Window(s)?["used_percent"]) + " used · " + Percent(Window(s)?["remaining_percent"]) + " remaining");
+                    var progress = new ProgressBar { Maximum = 100, Height = 4, BorderThickness = new Thickness(0), Margin = new Thickness(0, 4, 0, 8) };
+                    progress.SetResourceReference(ForegroundProperty, "Accent"); progress.SetResourceReference(BackgroundProperty, "Line");
+                    AutomationProperties.SetName(progress, name + " quota used");
+                    overviewUpdates.Add(s => { var next = Math.Clamp(N(Window(s)?["used_percent"]), 0, 100); if (progress.Value != next) progress.Value = next; });
+                    limits.Children.Add(progress);
+                    LiveRow(limits, "Resets", s => ResetTime(Window(s)?["resets_at"]));
+                }
             LiveRow(limits, "Credit balance", s => s?["credits"] == null ? "Unavailable" : B(s["credits"]?["unlimited"]) ? "Unlimited" : S(s["credits"]?["balance"]));
             limits.Children.Add(LiveJsonViewer("Full quota and credit data", s => new JsonObject { ["limits"] = s?["limits"]?.DeepClone(), ["credits"] = s?["credits"]?.DeepClone(), ["source"] = s?["limits_source"]?.DeepClone() }));
             Card("METRICS").Children.Add(LiveJsonViewer("Cost breakdown and model totals", s => s?["metrics"]));
@@ -484,37 +510,39 @@ public partial class MainWindow : Window
         UpdateOverviewControls();
     }
 
-    private TextBlock LiveText(Func<JsonObject?, string> getter, double size = 12, Brush? color = null)
+    private TextBlock LiveText(Func<JsonObject?, string> getter, double size = 13, Brush? color = null, ICollection<Action<JsonObject?>>? updates = null)
     {
         var text = Text("", size, color);
-        overviewUpdates.Add(snapshot => { var next = getter(snapshot); if (text.Text != next) text.Text = next; });
+        (updates ?? overviewUpdates).Add(snapshot => { var next = getter(snapshot); if (text.Text != next) text.Text = next; });
         return text;
     }
 
-    private void LiveRow(Panel panel, string label, Func<JsonObject?, string> getter)
+    private void LiveRow(Panel panel, string label, Func<JsonObject?, string> getter, ICollection<Action<JsonObject?>>? updates = null)
     {
         var grid = new Grid { Margin = new Thickness(0, 5, 0, 5) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.40, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.60, GridUnitType.Star) });
         var key = Text(label, 11, Muted); key.Margin = new Thickness(0, 0, 10, 0); grid.Children.Add(key);
-        var value = LiveText(getter); Grid.SetColumn(value, 1); grid.Children.Add(value); panel.Children.Add(grid);
+        var value = LiveText(getter, updates: updates); Typography.SetNumeralAlignment(value, FontNumeralAlignment.Tabular); Grid.SetColumn(value, 1); grid.Children.Add(value); panel.Children.Add(grid);
     }
 
-    private Expander LiveJsonViewer(string title, Func<JsonObject?, JsonNode?> getter)
+    private Expander LiveJsonViewer(string title, Func<JsonObject?, JsonNode?> getter, ICollection<Action<JsonObject?>>? updates = null, string? key = null)
     {
         var text = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 8, 0, 0) };
-        var panel = new Expander { Header = title, Content = text, IsExpanded = expanded.TryGetValue(title, out var open) && open };
+        key ??= title;
+        AutomationProperties.SetName(text, title);
+        var panel = new Expander { Header = title, Content = text, IsExpanded = expanded.TryGetValue(key, out var open) && open };
         void Update(JsonObject? snapshot) { if (panel.IsExpanded) { var next = getter(snapshot)?.ToJsonString(Backend.JsonOptions) ?? "Unavailable"; if (text.Text != next) text.Text = next; } }
-        panel.Expanded += (_, _) => { expanded[title] = true; Update(displayedSnapshot ?? backend.Snapshot); };
-        panel.Collapsed += (_, _) => expanded[title] = false;
-        overviewUpdates.Add(Update);
+        panel.Expanded += (_, _) => { expanded[key] = true; Update(displayedSnapshot ?? backend.Snapshot); };
+        panel.Collapsed += (_, _) => expanded[key] = false;
+        (updates ?? overviewUpdates).Add(Update);
         return panel;
     }
 
     private void UpdateOverviewControls()
     {
         if (overviewStart != null) { overviewStart.Content = backend.Running ? "Stop engine" : "Start presence"; AutomationProperties.SetName(overviewStart, overviewStart.Content.ToString()); overviewStart.IsEnabled = !busy && terminalProcess is not { HasExited: false }; }
-        if (overviewPause != null) { overviewPause.Content = B(backend.Config?["presence_enabled"]) ? "Pause" : "Resume"; AutomationProperties.SetName(overviewPause, overviewPause.Content.ToString()); overviewPause.IsEnabled = !busy; }
+        if (overviewPause != null) { overviewPause.Content = backend.PublicationEnabled ? "Pause" : "Resume"; AutomationProperties.SetName(overviewPause, overviewPause.Content.ToString()); overviewPause.IsEnabled = !busy; }
         if (overviewBackground != null) overviewBackground.IsEnabled = !busy && terminalProcess is not { HasExited: false };
     }
 
@@ -574,7 +602,22 @@ public partial class MainWindow : Window
     }
     private static string ChoiceLabel(string value) => value switch
     {
-        "codex_app" => "Codex App", "chat_gpt_app" => "ChatGPT App", "pro_5x" => "Pro 5x", "pro_20x" => "Pro 20x", "auto" => "Automatic", "ascii" => "ASCII", "minimal" => "Minimal", "soft" => "Soft", "chatgpt" => "Rounded", "work" => "Work / project", "continuous" => "Continuous since app opens", "neutral" => "Neutral · black and white", "slate" => "Slate · cool blue", "forest" => "Forest · muted green", "dusk" => "Dusk · warm purple", _ => Label(value)
+        "codex_app" => "Codex App",
+        "chat_gpt_app" => "ChatGPT App",
+        "pro_5x" => "Pro 5x",
+        "pro_20x" => "Pro 20x",
+        "auto" => "Automatic",
+        "ascii" => "ASCII",
+        "minimal" => "Minimal",
+        "soft" => "Soft",
+        "chatgpt" => "Rounded",
+        "work" => "Work / project",
+        "continuous" => "Continuous since app opens",
+        "neutral" => "Neutral · black and white",
+        "slate" => "Slate · cool blue",
+        "forest" => "Forest · muted green",
+        "dusk" => "Dusk · warm purple",
+        _ => Label(value)
     };
 
     private TextBox EditText(Panel panel, JsonObject parent, string key, string label, bool optional = false, int maximum = 0)
@@ -641,7 +684,11 @@ public partial class MainWindow : Window
 
     private static string PrivacyKey(string field) => field switch
     {
-        "project" => "show_project_name", "branch" => "show_git_branch", "quotas" => "show_limits", "custom" => "show_custom_text", _ => "show_" + field
+        "project" => "show_project_name",
+        "branch" => "show_git_branch",
+        "quotas" => "show_limits",
+        "custom" => "show_custom_text",
+        _ => "show_" + field
     };
 
     private void SaveBar(Func<Task>? additional = null)
@@ -662,6 +709,7 @@ public partial class MainWindow : Window
         var savingPage = page;
         var savingPreview = previewAppearance;
         foreach (var collect in collectValues) collect();
+        finalizeDraft?.Invoke();
         var savingVersion = editVersions.GetValueOrDefault(savingPage);
         if (draft != null && draftBase != null && backend.Config != null) await backend.SaveConfig(ConfigurationPatch.Merge(draftBase, draft, backend.Config));
         if (additional != null) await additional();
@@ -693,87 +741,102 @@ public partial class MainWindow : Window
             sections.Children.Add(button);
         }
         PageBody.Children.Add(sections);
-        var appearance = SettingsCard("Appearance", "APPEARANCE", "Preview changes here, then save to keep them.");
-        var interfaceStyle = EditChoice(appearance, preferenceCopy, "InterfaceStyle", "Interface style", new[] { "minimal", "soft", "chatgpt", "paper", "studio" });
-        var colorMode = EditChoice(appearance, preferenceCopy, "ColorMode", "Color mode", new[] { "dark", "light" });
-        var colorTheme = EditChoice(appearance, preferenceCopy, "ColorTheme", "Color theme", new[] { "neutral", "slate", "forest", "dusk" });
-        void PreviewAppearance() => Appearance.Apply(this, preferenceCopy.Deserialize<Preferences>()!);
-        previewAppearance = PreviewAppearance;
-        interfaceStyle.SelectionChanged += (_, _) => PreviewAppearance(); colorMode.SelectionChanged += (_, _) => PreviewAppearance(); colorTheme.SelectionChanged += (_, _) => PreviewAppearance();
         var display = draft["display"]!.AsObject();
-        RenderDiscordApplication();
-        var idle = SettingsCard("Activity", "AUTOMATIC IDLE HIDING", "Hide your Discord presence after inactivity. Show it again when Codex resumes work.");
-        var idleChoice = new JsonObject { ["enabled"] = N(display["idle_timeout_minutes"]) > 0 };
-        var idleEnabled = EditBoolean(idle, idleChoice, "enabled", "Hide presence when inactive");
-        idle.Children.Add(Text("Hide after (minutes)", 11, Muted));
-        var idleMinutes = new TextBox { Text = N(display["idle_timeout_minutes"]) > 0 ? S(display["idle_timeout_minutes"]) : "5", MaxLength = 4, Margin = new Thickness(0, 6, 0, 0), IsEnabled = idleEnabled.IsChecked == true };
-        AutomationProperties.SetName(idleMinutes, "Hide after (minutes)");
-        idleMinutes.TextChanged += (_, _) => MarkDirty();
-        idleEnabled.Checked += (_, _) => idleMinutes.IsEnabled = true; idleEnabled.Unchecked += (_, _) => idleMinutes.IsEnabled = false;
-        idle.Children.Add(idleMinutes);
-        AttachFieldFeedback(idleMinutes);
-        collectValues.Add(() =>
+        TextBox? homeFolder = null;
+        var builders = new Dictionary<string, Action> { ["Appearance"] = BuildAppearance, ["Activity"] = BuildActivity, ["Background"] = BuildBackground, ["Advanced"] = BuildAdvanced };
+        sections.Tag = (Action<string>)(section => { if (builders.Remove(section, out var build)) build(); });
+        void BuildAppearance()
         {
-            if (idleEnabled.IsChecked != true) { display["idle_timeout_minutes"] = 0; return; }
-            if (!int.TryParse(idleMinutes.Text, out var minutes) || minutes < 1 || minutes > 1440) RejectField(idleMinutes, "Choose an idle timeout between 1 and 1440 minutes.", "Activity");
-            display["idle_timeout_minutes"] = minutes;
-        });
-        var elapsed = SettingsCard("Activity", "ELAPSED TIME", "Continuous keeps counting across edits. Work / project resets with new activity.");
-        EditChoice(elapsed, draft["display"]!.AsObject(), "timer_mode", "Presence timer", new[] { "continuous", "work" });
-        EditBoolean(elapsed, draft["display"]!.AsObject(), "pause_timer_when_idle", "Hide only the clock while idle or waiting");
-        var priority = SettingsCard("Activity", "ACTIVITY PRIORITY", "Let games or selected apps take over. Codex monitoring continues and presence returns when they close.");
-        EditBoolean(priority, preferenceCopy, "PreferOtherApps", "Give games and selected apps priority");
-        var games = EditBoolean(priority, preferenceCopy, "DetectSteamGames", "Detect running Steam games");
-        EditText(priority, preferenceCopy, "PriorityApplications", "Other app executables (comma-separated)", maximum: 1024);
-        var priorityEnabled = priority.Children.OfType<CheckBox>().First();
-        void UpdatePriorityControls() { games.IsEnabled = priorityEnabled.IsChecked == true; Elements<TextBox>(priority).Single().IsEnabled = priorityEnabled.IsChecked == true; }
-        priorityEnabled.Checked += (_, _) => UpdatePriorityControls(); priorityEnabled.Unchecked += (_, _) => UpdatePriorityControls(); UpdatePriorityControls();
-        var planCard = SettingsCard("Activity", "SUBSCRIPTION");
-        var plan = draft["openai_plan"]!.AsObject();
-        var planMode = EditChoice(planCard, plan, "mode", "Detection", new[] { "auto", "manual" });
-        var planTier = EditChoice(planCard, plan, "tier", "Manual plan", new[] { "free", "go", "plus", "pro_5x", "pro_20x", "business", "enterprise", "edu" });
-        planTier.IsEnabled = planMode.SelectedValue?.ToString() == "manual"; planMode.SelectionChanged += (_, _) => planTier.IsEnabled = planMode.SelectedValue?.ToString() == "manual";
-        EditBoolean(planCard, plan, "show_price", "Show plan price");
-        EditBoolean(planCard, draft["privacy"]!.AsObject(), "show_subscription", "Show subscription in Discord");
-        var startup = SettingsCard("Background", "STARTUP", "Automatic launches stay hidden. Open your shortcut to show the dashboard.");
-        foreach (var pair in new[] { ("StartWithChatGpt", "Start with Codex / ChatGPT in background"), ("StartWithWindows", "Start with Windows"), ("StartEngineOnOpen", "Start presence when opening this app"), ("StartInBackground", "Open in background and start presence") }) EditBoolean(startup, preferenceCopy, pair.Item1, pair.Item2);
-        var window = SettingsCard("Background", "WINDOW & TRAY");
-        EditBoolean(window, preferenceCopy, "CloseToTray", "Keep running when the window closes");
-        EditBoolean(window, preferenceCopy, "HideTrayIcon", "Hide the system tray icon");
-        window.Children.Add(Text("Reopen Codex Presence to return. Choose Exit to stop the app and its engine.", 13, Muted));
-        var application = SettingsCard("Advanced", "MONITORING", "Change these only when needed. Saving monitoring preferences restarts the engine.");
-        var homeFolder = EditText(application, preferenceCopy, "CodexHome", "Codex home folder", maximum: 2048);
-        AttachFieldFeedback(homeFolder);
-        foreach (var pair in new[] { ("PollSeconds", "Poll interval (seconds)", 1, 60), ("StaleSeconds", "Stale session cutoff (seconds)", 1, 86400), ("StickySeconds", "Keep active session (seconds)", 60, 86400) })
-        {
-            var box = new TextBox { Text = S(preferenceCopy[pair.Item1]), Margin = new Thickness(0, 6, 0, 12) };
-            AutomationProperties.SetName(box, pair.Item2);
-            application.Children.Add(Text(pair.Item2, 11, Muted)); application.Children.Add(box);
-            box.TextChanged += (_, _) => MarkDirty();
-            AttachFieldFeedback(box);
-            collectValues.Add(() => { if (!int.TryParse(box.Text, out var number) || number < pair.Item3 || number > pair.Item4) RejectField(box, pair.Item2 + " must be between " + pair.Item3 + " and " + pair.Item4 + ".", "Advanced"); preferenceCopy[pair.Item1] = number; });
+            var appearance = SettingsCard("Appearance", "APPEARANCE", "Preview changes here, then save to keep them.");
+            var interfaceStyle = EditChoice(appearance, preferenceCopy, "InterfaceStyle", "Interface style", new[] { "minimal", "soft", "chatgpt", "paper", "studio" });
+            var colorMode = EditChoice(appearance, preferenceCopy, "ColorMode", "Color mode", new[] { "dark", "light" });
+            var colorTheme = EditChoice(appearance, preferenceCopy, "ColorTheme", "Color theme", new[] { "neutral", "slate", "forest", "dusk" });
+            void PreviewAppearance() => Appearance.Apply(this, preferenceCopy.Deserialize<Preferences>()!);
+            previewAppearance = PreviewAppearance;
+            interfaceStyle.SelectionChanged += (_, _) => PreviewAppearance(); colorMode.SelectionChanged += (_, _) => PreviewAppearance(); colorTheme.SelectionChanged += (_, _) => PreviewAppearance();
         }
-        foreach (var pair in new[] { ("MonitorOnly", "Monitor locally without publishing to Discord"), ("IncludeWsl", "Include WSL sessions"), ("EfficiencyMode", "Windows Efficiency mode for the engine") }) EditBoolean(application, preferenceCopy, pair.Item1, pair.Item2);
-        var branding = new StackPanel();
-        foreach (var key in new[] { "large_image_key", "large_text", "desktop_large_image_key", "desktop_large_text", "small_image_key", "small_text" }) EditText(branding, display, key, Label(key));
-        var activityKeys = display["activity_small_image_keys"]!.AsObject();
-        foreach (var key in activityKeys.Select(x => x.Key).ToArray()) EditText(branding, activityKeys, key, Label(key) + " icon key (optional)", true);
-        EditChoice(branding, display, "terminal_logo_mode", "Original terminal logo mode", new[] { "auto", "ascii", "image" });
-        EditText(branding, display, "terminal_logo_path", "Original terminal logo file (optional)", true);
-        SettingsCard("Advanced", "BRANDING").Children.Add(new Expander { Header = "Images, tooltips & terminal logo", Content = branding });
-        var pricing = SettingsCard("Advanced", "PRICING", "Override rates per million tokens and model aliases. Save validates the complete configuration before replacing it.");
-        var pricingEditor = new TextBox { Text = draft["pricing"]!.ToJsonString(Backend.JsonOptions), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, MinHeight = 100, MaxHeight = 250, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        pricingEditor.TextChanged += (_, _) => MarkDirty();
-        var pricingBody = new StackPanel(); pricingBody.Children.Add(pricingEditor); AttachFieldFeedback(pricingEditor);
-        var pricingExpander = new Expander { Header = "Pricing aliases & overrides (JSON)", Content = pricingBody }; pricing.Children.Add(pricingExpander);
-        AutomationProperties.SetName(pricingEditor, "Pricing JSON");
-        collectValues.Add(() => { try { draft["pricing"] = JsonNode.Parse(pricingEditor.Text)?.AsObject() ?? throw new JsonException(); } catch (Exception error) when (error is JsonException or InvalidOperationException) { pricingExpander.IsExpanded = true; RejectField(pricingEditor, "Enter a valid pricing JSON object.", "Advanced"); } });
-        var identity = SettingsCard("Advanced", "ENGINE INFORMATION", "Default IDs are built in. Select your own application in Activity.");
-        Row(identity, "Schema", S(draft["schema_version"]));
-        Row(identity, "Default CLI / ChatGPT ID", S(draft["discord_client_id"]));
-        Row(identity, "Default Codex App ID", S(draft["discord_client_id_desktop"]));
+        void BuildActivity()
+        {
+            RenderDiscordApplication();
+            var idle = SettingsCard("Activity", "AUTOMATIC IDLE HIDING", "Hide your Discord presence after inactivity. Show it again when Codex resumes work.");
+            var idleChoice = new JsonObject { ["enabled"] = N(display["idle_timeout_minutes"]) > 0 };
+            var idleEnabled = EditBoolean(idle, idleChoice, "enabled", "Hide presence when inactive");
+            idle.Children.Add(Text("Hide after (minutes)", 11, Muted));
+            var idleMinutes = new TextBox { Text = N(display["idle_timeout_minutes"]) > 0 ? S(display["idle_timeout_minutes"]) : "5", MaxLength = 4, Margin = new Thickness(0, 6, 0, 0), IsEnabled = idleEnabled.IsChecked == true };
+            AutomationProperties.SetName(idleMinutes, "Hide after (minutes)");
+            idleMinutes.TextChanged += (_, _) => MarkDirty();
+            idleEnabled.Checked += (_, _) => idleMinutes.IsEnabled = true; idleEnabled.Unchecked += (_, _) => idleMinutes.IsEnabled = false;
+            idle.Children.Add(idleMinutes);
+            AttachFieldFeedback(idleMinutes);
+            collectValues.Add(() =>
+            {
+                if (idleEnabled.IsChecked != true) { display["idle_timeout_minutes"] = 0; return; }
+                if (!int.TryParse(idleMinutes.Text, out var minutes) || minutes < 1 || minutes > 1440) RejectField(idleMinutes, "Choose an idle timeout between 1 and 1440 minutes.", "Activity");
+                display["idle_timeout_minutes"] = minutes;
+            });
+            var elapsed = SettingsCard("Activity", "ELAPSED TIME", "Continuous keeps counting across edits. Work / project resets with new activity.");
+            EditChoice(elapsed, draft["display"]!.AsObject(), "timer_mode", "Presence timer", new[] { "continuous", "work" });
+            EditBoolean(elapsed, draft["display"]!.AsObject(), "pause_timer_when_idle", "Hide only the clock while idle or waiting");
+            var priority = SettingsCard("Activity", "ACTIVITY PRIORITY", "Let games or selected apps take over. Codex monitoring continues and presence returns when they close.");
+            EditBoolean(priority, preferenceCopy, "PreferOtherApps", "Give games and selected apps priority");
+            var games = EditBoolean(priority, preferenceCopy, "DetectSteamGames", "Detect running Steam games");
+            EditText(priority, preferenceCopy, "PriorityApplications", "Other app executables (comma-separated)", maximum: 1024);
+            var priorityEnabled = priority.Children.OfType<CheckBox>().First();
+            void UpdatePriorityControls() { games.IsEnabled = priorityEnabled.IsChecked == true; Elements<TextBox>(priority).Single().IsEnabled = priorityEnabled.IsChecked == true; }
+            priorityEnabled.Checked += (_, _) => UpdatePriorityControls(); priorityEnabled.Unchecked += (_, _) => UpdatePriorityControls(); UpdatePriorityControls();
+            var planCard = SettingsCard("Activity", "SUBSCRIPTION");
+            var plan = draft["openai_plan"]!.AsObject();
+            var planMode = EditChoice(planCard, plan, "mode", "Detection", new[] { "auto", "manual" });
+            var planTier = EditChoice(planCard, plan, "tier", "Manual plan", new[] { "free", "go", "plus", "pro_5x", "pro_20x", "business", "enterprise", "edu" });
+            planTier.IsEnabled = planMode.SelectedValue?.ToString() == "manual"; planMode.SelectionChanged += (_, _) => planTier.IsEnabled = planMode.SelectedValue?.ToString() == "manual";
+            EditBoolean(planCard, plan, "show_price", "Show plan price");
+            EditBoolean(planCard, draft["privacy"]!.AsObject(), "show_subscription", "Show subscription in Discord");
+        }
+        void BuildBackground()
+        {
+            var startup = SettingsCard("Background", "STARTUP", "Automatic launches stay hidden. Open your shortcut to show the dashboard.");
+            foreach (var pair in new[] { ("StartWithChatGpt", "Start with Codex / ChatGPT in background"), ("StartWithWindows", "Start with Windows"), ("StartEngineOnOpen", "Start presence when opening this app"), ("StartInBackground", "Open in background and start presence") }) EditBoolean(startup, preferenceCopy, pair.Item1, pair.Item2);
+            var window = SettingsCard("Background", "WINDOW & TRAY");
+            EditBoolean(window, preferenceCopy, "CloseToTray", "Keep running when the window closes");
+            EditBoolean(window, preferenceCopy, "HideTrayIcon", "Hide the system tray icon");
+            window.Children.Add(Text("Reopen Codex Presence to return. Choose Exit to stop the app and its engine.", 13, Muted));
+        }
+        void BuildAdvanced()
+        {
+            var application = SettingsCard("Advanced", "MONITORING", "Change these only when needed. Saving monitoring preferences restarts the engine.");
+            homeFolder = EditText(application, preferenceCopy, "CodexHome", "Codex home folder", maximum: 2048);
+            AttachFieldFeedback(homeFolder);
+            foreach (var pair in new[] { ("PollSeconds", "Poll interval (seconds)", 1, 60), ("StaleSeconds", "Stale session cutoff (seconds)", 1, 86400), ("StickySeconds", "Keep active session (seconds)", 60, 86400) })
+            {
+                var box = new TextBox { Text = S(preferenceCopy[pair.Item1]), Margin = new Thickness(0, 6, 0, 12) };
+                AutomationProperties.SetName(box, pair.Item2);
+                application.Children.Add(Text(pair.Item2, 11, Muted)); application.Children.Add(box);
+                box.TextChanged += (_, _) => MarkDirty();
+                AttachFieldFeedback(box);
+                collectValues.Add(() => { if (!int.TryParse(box.Text, out var number) || number < pair.Item3 || number > pair.Item4) RejectField(box, pair.Item2 + " must be between " + pair.Item3 + " and " + pair.Item4 + ".", "Advanced"); preferenceCopy[pair.Item1] = number; });
+            }
+            foreach (var pair in new[] { ("MonitorOnly", "Monitor locally without publishing to Discord"), ("IncludeWsl", "Include WSL sessions"), ("EfficiencyMode", "Windows Efficiency mode for the engine") }) EditBoolean(application, preferenceCopy, pair.Item1, pair.Item2);
+            var branding = new StackPanel();
+            foreach (var key in new[] { "large_image_key", "large_text", "desktop_large_image_key", "desktop_large_text", "small_image_key", "small_text" }) EditText(branding, display, key, Label(key));
+            var activityKeys = display["activity_small_image_keys"]!.AsObject();
+            foreach (var key in activityKeys.Select(x => x.Key).ToArray()) EditText(branding, activityKeys, key, Label(key) + " icon key (optional)", true);
+            EditChoice(branding, display, "terminal_logo_mode", "Original terminal logo mode", new[] { "auto", "ascii", "image" });
+            EditText(branding, display, "terminal_logo_path", "Original terminal logo file (optional)", true);
+            SettingsCard("Advanced", "BRANDING").Children.Add(new Expander { Header = "Images, tooltips & terminal logo", Content = branding });
+            var pricing = SettingsCard("Advanced", "PRICING", "Override rates per million tokens and model aliases. Save validates the complete configuration before replacing it.");
+            var pricingEditor = new TextBox { Text = draft["pricing"]!.ToJsonString(Backend.JsonOptions), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, MinHeight = 100, MaxHeight = 250, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            pricingEditor.TextChanged += (_, _) => MarkDirty();
+            var pricingBody = new StackPanel(); pricingBody.Children.Add(pricingEditor); AttachFieldFeedback(pricingEditor);
+            var pricingExpander = new Expander { Header = "Pricing aliases & overrides (JSON)", Content = pricingBody }; pricing.Children.Add(pricingExpander);
+            AutomationProperties.SetName(pricingEditor, "Pricing JSON");
+            collectValues.Add(() => { try { draft["pricing"] = JsonNode.Parse(pricingEditor.Text)?.AsObject() ?? throw new JsonException(); } catch (Exception error) when (error is JsonException or InvalidOperationException) { pricingExpander.IsExpanded = true; RejectField(pricingEditor, "Enter a valid pricing JSON object.", "Advanced"); } });
+            var identity = SettingsCard("Advanced", "ENGINE INFORMATION", "Default IDs are built in. Select your own application in Activity.");
+            Row(identity, "Schema", S(draft["schema_version"]));
+            Row(identity, "Default CLI / ChatGPT ID", S(draft["discord_client_id"]));
+            Row(identity, "Default Codex App ID", S(draft["discord_client_id_desktop"]));
+        }
         Preferences? pending = null;
-        collectValues.Add(() =>
+        finalizeDraft = () =>
         {
             pending = preferenceCopy.Deserialize<Preferences>()!;
             try
@@ -781,11 +844,11 @@ public partial class MainWindow : Window
                 if (string.IsNullOrWhiteSpace(pending.CodexHome) || !Path.IsPathFullyQualified(pending.CodexHome)) throw new ArgumentException();
                 pending.CodexHome = Path.GetFullPath(pending.CodexHome);
             }
-            catch (Exception error) when (error is ArgumentException or NotSupportedException) { RejectField(homeFolder, "Enter a valid absolute Codex home folder path.", "Advanced"); }
-            if (!string.Equals(pending.CodexHome, backend.Options.CodexHome, StringComparison.OrdinalIgnoreCase) && editors.Any(pair => pair.Key != "Settings" && pair.Value.Dirty)) RejectField(homeFolder, "Save or reload your other edited tabs before changing the Codex home folder.", "Advanced");
+            catch (Exception error) when (error is ArgumentException or NotSupportedException) { ShowSettingsSection("Advanced", false); RejectField(homeFolder!, "Enter a valid absolute Codex home folder path.", "Advanced"); }
+            if (!string.Equals(pending.CodexHome, backend.Options.CodexHome, StringComparison.OrdinalIgnoreCase) && editors.Any(pair => pair.Key != "Settings" && pair.Value.Dirty)) RejectField(homeFolder!, "Save or reload your other edited tabs before changing the Codex home folder.", "Advanced");
             if (!string.Equals(Path.GetFullPath(pending.CodexHome), Path.GetFullPath(backend.Options.CodexHome), StringComparison.OrdinalIgnoreCase) && dirty)
                 Footer.Text = "Switching Codex home; reload its presence settings after saving.";
-        });
+        };
         SaveBar(() => ApplyPreferences(pending!));
         ShowSettingsSection(settingsSection, false);
     }
@@ -836,7 +899,9 @@ public partial class MainWindow : Window
         await backend.LoadConfig();
         await backend.SaveConfig(backend.Config!.DeepClone().AsObject());
         if (!testMode) await backend.SetPriorityHold(await Task.Run(() => PriorityMonitor.Find(backend.Options)) != null);
-        await backend.Start();
+        var starting = backend.Start();
+        if (page == "Overview" && IsVisible) RenderOverview();
+        await starting;
         Footer.Text = backend.Options.MonitorOnly ? "Monitoring locally · Discord publication is off." : S(backend.Snapshot?["discord_status"], "Connecting to Discord…");
         if (page == "Overview") RenderOverview();
     }
@@ -881,7 +946,7 @@ public partial class MainWindow : Window
             var match = await Task.Run(() => PriorityMonitor.Find(preferences));
             if (!closing && backend.Running && ReferenceEquals(preferences, backend.Options)) await backend.SetPriorityHold(match != null);
         }
-        catch (Exception error) { Footer.Text = "Priority check: " + error.Message; }
+        catch (Exception error) { ReportError(error); }
         finally { checkingPriority = false; }
     }
 
@@ -895,6 +960,7 @@ public partial class MainWindow : Window
     {
         checkingHost = true;
         try { var running = await Task.Run(HostMonitor.IsRunning); if (!closing && !busy && !dirty && running != hostWasRunning) await Guard(() => ApplyHostState(running)); }
+        catch (Exception error) { ReportError(error); }
         finally { checkingHost = false; }
     }
 
@@ -1065,8 +1131,10 @@ public partial class MainWindow : Window
         Check(S(backend.Config?["display"]?["token_label"]) == "TOKENS" && S(backend.Config?["display"]?["context_label"]) == "WINDOW", "Custom token and context labels save through the engine validator");
         Check(B(backend.Config?["privacy"]?["show_custom_text"]) && S(backend.Config?["display"]?["custom_text"]) == "Building something useful", "Custom presence text and its visibility save together");
         Navigate("Settings"); UpdateLayout();
+        ShowSettingsSection("Background"); UpdateLayout();
         Check(Elements<CheckBox>(PageBody).Any(item => AutomationProperties.GetName(item) == "Open in background and start presence"), "Background launch preference is available in settings");
         Check(Elements<CheckBox>(PageBody).Any(item => AutomationProperties.GetName(item) == "Hide the system tray icon") && Elements<CheckBox>(PageBody).Any(item => AutomationProperties.GetName(item) == "Start with Codex / ChatGPT in background"), "Hidden-tray and background host launch preferences are available");
+        ShowSettingsSection("Activity"); UpdateLayout();
         var subscription = Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Show subscription in Discord"); subscription.IsChecked = false;
         await SaveDraft();
         Check(!B(backend.Config?["privacy"]?["show_subscription"]), "Subscription visibility saves independently from the plan price");
@@ -1099,6 +1167,7 @@ public partial class MainWindow : Window
         Check(S(backend.Snapshot?["preview"]?["app_name"]) == selectedApplication && S(backend.Snapshot?["preview"]?["details"]).Contains(" - Verification chat title", StringComparison.Ordinal) && S(backend.Snapshot?["preview"]?["state"]).StartsWith("GPT-", StringComparison.Ordinal) && S(backend.Snapshot?["preview"]?["state"]).Contains("Token:", StringComparison.Ordinal), "Parsed sessions keep activity before model and usage with the application heading");
         Navigate("Settings"); UpdateLayout();
         var engineBeforeAppearance = backend.ProcessId;
+        ShowSettingsSection("Appearance"); UpdateLayout();
         Check(PageBody.Children.OfType<Border>().Where(card => card.Tag is string && card.Visibility == Visibility.Visible).All(card => (string)card.Tag == "Appearance"), "Settings opens with only the Appearance section visible");
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Interface style").SelectedValue = "soft";
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Color mode").SelectedValue = "light";
@@ -1128,6 +1197,7 @@ public partial class MainWindow : Window
         await SaveDraft();
         Check(N(backend.Config?["display"]?["idle_timeout_minutes"]) == 12 && backend.ProcessId == engineBeforeAppearance, "The selected idle minutes save without restarting the engine");
         var savedIdleConfig = File.ReadAllText(backend.ConfigPath);
+        ShowSettingsSection("Activity"); UpdateLayout();
         Elements<TextBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Hide after (minutes)").Text = "0";
         var invalidIdleRejected = false;
         try { await SaveDraft(); } catch (InvalidOperationException) { invalidIdleRejected = true; }
@@ -1149,6 +1219,7 @@ public partial class MainWindow : Window
         Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Hide presence when inactive").IsChecked = false;
         await SaveDraft();
         Check(N(backend.Config?["display"]?["idle_timeout_minutes"]) == 0, "Automatic idle hiding can be disabled again");
+        ShowSettingsSection("Appearance"); UpdateLayout();
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Color theme").SelectedValue = "dusk";
         var savingAppearance = SaveDraft();
         Navigate("Layout"); UpdateLayout();
@@ -1174,6 +1245,7 @@ public partial class MainWindow : Window
         for (var attempt = 0; attempt < 30 && B(backend.Snapshot?["priority_held"]); attempt++) await Task.Delay(100);
         Check(!B(backend.Snapshot?["priority_held"]) && backend.Running, "Priority release restores the same running desktop engine");
         Check(File.ReadAllText(backend.ConfigPath) == configBeforePriority && backend.ProcessId == engineBeforePriority, "Priority transitions preserve saved publication settings and engine identity");
+        ShowSettingsSection("Advanced"); UpdateLayout();
         var pollBox = Elements<TextBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Poll interval (seconds)");
         pollBox.Text = "0";
         var beforeValidation = File.ReadAllText(backend.ConfigPath);
@@ -1244,18 +1316,18 @@ public partial class MainWindow : Window
         var normalWidth = Width;
         Width = 460;
         foreach (var style in new[] { "minimal", "soft", "chatgpt", "paper", "studio" })
-        foreach (var theme in new[] { "neutral", "slate", "forest", "dusk" })
-        foreach (var mode in new[] { "dark", "light" })
-        {
-            backend.Options.InterfaceStyle = style; backend.Options.ColorMode = mode; backend.Options.ColorTheme = theme;
-            Appearance.Apply(this, backend.Options); Navigate("Overview"); UpdateLayout();
-            var foreground = Luminance("Muted"); var background = Luminance("Surface");
-            Check((Math.Max(foreground, background) + 0.05) / (Math.Min(foreground, background) + 0.05) >= 4.5, style + " / " + theme + " / " + mode + " keeps secondary text readable");
-            var accent = Luminance("Accent"); var onAccent = Luminance("OnAccent");
-            Check((Math.Max(accent, onAccent) + 0.05) / (Math.Min(accent, onAccent) + 0.05) >= 4.5, style + " / " + theme + " / " + mode + " keeps primary button text readable");
-            Check(PageBody.ActualWidth <= PageScroll.ActualWidth && StatusPanel.ActualWidth < ActualWidth && Elements<Button>(PageBody).All(button => button.DesiredSize.Width <= PageBody.ActualWidth) && Navigation.Children.OfType<Button>().All(button => button.DesiredSize.Width <= Navigation.ActualWidth / 5), style + " / " + theme + " / " + mode + " fits the compact window and navigation icons");
-            Capture("Theme-" + style + "-" + theme + "-" + mode);
-        }
+            foreach (var theme in new[] { "neutral", "slate", "forest", "dusk" })
+                foreach (var mode in new[] { "dark", "light" })
+                {
+                    backend.Options.InterfaceStyle = style; backend.Options.ColorMode = mode; backend.Options.ColorTheme = theme;
+                    Appearance.Apply(this, backend.Options); Navigate("Overview"); UpdateLayout();
+                    var foreground = Luminance("Muted"); var background = Luminance("Surface");
+                    Check((Math.Max(foreground, background) + 0.05) / (Math.Min(foreground, background) + 0.05) >= 4.5, style + " / " + theme + " / " + mode + " keeps secondary text readable");
+                    var accent = Luminance("Accent"); var onAccent = Luminance("OnAccent");
+                    Check((Math.Max(accent, onAccent) + 0.05) / (Math.Min(accent, onAccent) + 0.05) >= 4.5, style + " / " + theme + " / " + mode + " keeps primary button text readable");
+                    Check(PageBody.ActualWidth <= PageScroll.ActualWidth && StatusPanel.ActualWidth < ActualWidth && Elements<Button>(PageBody).All(button => button.DesiredSize.Width <= PageBody.ActualWidth) && Navigation.Children.OfType<Button>().All(button => button.DesiredSize.Width <= Navigation.ActualWidth / 5), style + " / " + theme + " / " + mode + " fits the compact window and navigation icons");
+                    Capture("Theme-" + style + "-" + theme + "-" + mode);
+                }
         backend.Options.InterfaceStyle = "minimal"; backend.Options.ColorMode = "dark"; backend.Options.ColorTheme = "neutral"; Appearance.Apply(this, backend.Options);
         editors.Remove("Settings");
         Navigate("Settings");
@@ -1273,8 +1345,10 @@ public partial class MainWindow : Window
             Check(PageBody.Children.Count > 0, name + " page builds");
             Capture(name);
         }
+        if (args.Contains("--profile-quality")) ProfileQuality();
         await DiscordApplicationChecks(checks);
         await AuditChecks(checks, evidence);
+        await QualityChecks(checks);
         dirty = false;
         await backend.Stop();
         Check(!backend.Running, "Quit command gracefully stops the owned engine");

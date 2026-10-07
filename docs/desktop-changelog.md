@@ -1,5 +1,18 @@
 # Desktop release notes
 
+## 1.9.0
+
+- Load Settings sections only when opened, retaining their controls, unsaved values and validation when moving between sections or tabs.
+- Show recent sessions in batches of twelve. All sessions remain available through Show more; details build on expansion and suspend updates while collapsed. Full-data expansion is tracked independently per session.
+- Move configuration validation commands, file hashes, backups, atomic replacement and desktop preference persistence off the UI thread. Serialize configuration reads and writes and capture their target paths.
+- Distinguish unknown speed from Standard and Fast. Missing or malformed token, cost and context values remain unavailable.
+- Reflect external publication changes in Pause / Resume without confusing the master switch with monitoring-only, idle hiding or game priority.
+- Keep recovery guidance in the main interface and technical errors in Tools. Show scanning and automatic reconnect feedback; handle background watcher failures.
+- Restore the original field's focus when canceling the exit decision. Improve input boundary contrast, pressed and hover states, accessible names, shared sizing and tabular numeric text.
+- Make retained preview icons and quota bars respond to appearance changes. Keep all five styles, four palettes, both color modes, application identities, privacy choices and schema 18.
+
+The audit includes reproducible synthetic performance measurements, automated runtime checks and native window interaction. See [audit coverage](desktop-audit.md) for measured results and platform limits.
+
 ## 1.8.0
 
 - Added Settings → Activity → Discord application with Default and Custom sources. Custom accepts a public Application ID from Discord's General Information page; no bot token, OAuth scope, intents or Administrator permission is needed.

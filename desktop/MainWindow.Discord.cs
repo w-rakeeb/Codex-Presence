@@ -36,7 +36,7 @@ public partial class MainWindow
             var custom = source.SelectedValue?.ToString() == "custom";
             if (!custom && !string.IsNullOrWhiteSpace(id.Text) && !ValidDiscordApplicationId(id.Text.Trim())) id.Text = "";
             id.IsEnabled = custom; large.IsEnabled = custom; small.IsEnabled = custom; artwork.IsEnabled = custom;
-            if (!custom && id.Tag is TextBlock feedback) { feedback.Visibility = Visibility.Collapsed; id.SetResourceReference(BorderBrushProperty, "Line"); AutomationProperties.SetHelpText(id, ""); }
+            if (!custom && id.Tag is TextBlock feedback) { feedback.Visibility = Visibility.Collapsed; id.SetResourceReference(BorderBrushProperty, "InputLine"); AutomationProperties.SetHelpText(id, ""); }
         }
         source.SelectionChanged += (_, _) => UpdateControls();
         UpdateControls();

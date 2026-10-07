@@ -5,6 +5,7 @@ Release the desktop application separately from the upstream terminal package. D
 1. Update `desktop/CodexPresence.csproj`, the guide and release notes.
 2. Run `scripts/verify.ps1` for Rust changes and build with `scripts/build-desktop.ps1 -OutputDirectory <absolute staging path>`.
 3. Run `scripts/verify-desktop.ps1 -AppRoot <staging path>` and repeat with `-CrossVolume`. These checks use synthetic sessions and cannot publish Discord activity.
+   Use `-Profile` to write `Data/Verification/performance.json` with WPF construction/update timings and UI-thread allocations for a synthetic 100-session dashboard. Compare builds on the same machine, with other heavy work stopped; these are local measurements, not universal latency guarantees.
 4. Exercise dropdown selection with mouse and keyboard, change tabs with unsaved values, return and save, and reopen a hidden app. Check the actual X-button decision with a draft, Cancel and Review, scrollbar rail/thumb behavior and compact field ordering. Check widths from 320 to 1920 logical pixels, enlarged Windows text, Dark/Light modes and all five styles. Record platform and DPI limits in the audit report.
 5. Check the actual engine with `doctor` and `status`. Verify only the intended instance is running. Never replace a running executable.
 6. Inspect the staged Git diff and included files. Exclude session data, authentication, personal settings, backups, logs and verification fixtures. Keep `LICENSE` and `NOTICE.md`.

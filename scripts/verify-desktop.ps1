@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch] $CrossVolume, [string] $AppRoot)
+param([switch] $CrossVolume, [switch] $Profile, [string] $AppRoot)
 $ErrorActionPreference = 'Stop'
 $taskProject = Split-Path -Parent $PSScriptRoot
 $taskRoot = Join-Path $taskProject '.build\desktop'
@@ -25,6 +25,7 @@ $taskStart = [Diagnostics.ProcessStartInfo]::new((Join-Path $taskRoot 'Codex Pre
 $taskStart.UseShellExecute = $false
 $taskStart.WorkingDirectory = $taskRoot
 $taskStart.ArgumentList.Add('--self-test')
+if ($Profile) { $taskStart.ArgumentList.Add('--profile-quality') }
 $taskStart.ArgumentList.Add('--test-home')
 $taskStart.ArgumentList.Add($taskHome)
 $taskProcess = [Diagnostics.Process]::Start($taskStart)
