@@ -1,5 +1,15 @@
 # Desktop audit
 
+## 1.9.1 silent startup
+
+Verified 2026-10-10 on Windows 11 x64. The desktop bridge gates publication on a fresh user prompt or task-start timestamp after the companion opens. No new dependency or preference migration is required.
+
+- 301 Rust tests pass, with formatting and strict all-feature Clippy checks.
+- 379 desktop checks pass on the same drive and across drives. Isolated engine checks cover restored working sessions, empty session folders, background token updates, fresh prompts, priority suppression, engine restart before and after work, and a new companion session.
+- Verification uses monitoring-only fixtures and cannot publish Discord activity. Sign-in launch is checked using the existing background arguments; an actual PC reboot was not performed.
+
+The 1.9.0 UI and platform limitations below still apply.
+
 ## 1.9.0 responsiveness and product quality
 
 Audited 2026-10-07 on Windows 11 x64. The existing WPF/Rust architecture and all presence features are preserved; no dependency or web rewrite was added.

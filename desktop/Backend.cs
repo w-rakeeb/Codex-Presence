@@ -124,6 +124,8 @@ public sealed class Backend
     public event Action? Exited;
     public string? LastError { get; private set; }
     public bool PriorityHeld { get; private set; }
+    public bool WaitForNewWork { get; set; } = true;
+    private readonly DateTimeOffset applicationStartedAt = DateTimeOffset.UtcNow;
     private readonly long applicationStartEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private Process? process;
     private JsonObject? snapshot;
@@ -150,6 +152,8 @@ public sealed class Backend
         };
         info.Environment["CODEX_HOME"] = Options.CodexHome;
         info.Environment["CODEX_PRESENCE_STARTED_AT"] = applicationStartEpoch.ToString(CultureInfo.InvariantCulture);
+        if (WaitForNewWork) info.Environment["CODEX_PRESENCE_WAIT_FOR_WORK_SINCE"] = applicationStartedAt.ToString("O", CultureInfo.InvariantCulture);
+        else info.Environment.Remove("CODEX_PRESENCE_WAIT_FOR_WORK_SINCE");
         info.Environment["CODEX_PRESENCE_SURFACE"] = "desktop";
         info.Environment["CODEX_PRESENCE_POLL_SECONDS"] = Options.PollSeconds.ToString(CultureInfo.InvariantCulture);
         info.Environment["CODEX_PRESENCE_STALE_SECONDS"] = Options.StaleSeconds.ToString(CultureInfo.InvariantCulture);
@@ -302,6 +306,7 @@ public sealed class Backend
                 try
                 {
                     if (JsonNode.Parse(line) is not JsonObject value) { Logged?.Invoke(line); continue; }
+                    if (value["startup_waiting"] is JsonValue waiting && waiting.TryGetValue<bool>(out var pending) && !pending) WaitForNewWork = false;
                     Volatile.Write(ref snapshot, value);
                     Updated?.Invoke(value);
                     ready.TrySetResult(true);

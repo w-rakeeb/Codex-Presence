@@ -93,7 +93,7 @@ public partial class MainWindow : Window
             options.MonitorOnly = true;
             options.CloseToTray = false;
         }
-        backend = new Backend(root, options, testMode);
+        backend = new Backend(root, options, testMode) { WaitForNewWork = !testMode };
         Appearance.Apply(this, options);
         SizeChanged += (_, _) => UpdateResponsiveLayout();
         refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -1352,19 +1352,75 @@ public partial class MainWindow : Window
         dirty = false;
         await backend.Stop();
         Check(!backend.Running, "Quit command gracefully stops the owned engine");
+        await StartupPublicationChecks(checks);
         File.WriteAllText(Path.Combine(evidence, "results.json"), JsonSerializer.Serialize(new { passed = checks.Count, configVolume = Path.GetPathRoot(backend.ConfigPath), backupVolume = Path.GetPathRoot(root), checks, snapshot = backend.Snapshot }, Backend.JsonOptions));
         await ExitApp();
+    }
+
+    private async Task StartupPublicationChecks(List<string> checks)
+    {
+        void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); checks.Add(message); }
+        var isolated = new Backend(root, backend.Options, true);
+        Check(isolated.Options.MonitorOnly, "Startup verification cannot publish Discord activity");
+        var start = isolated.CreateStartInfo("desktop-bridge --observe");
+        Check(start.Environment.ContainsKey("CODEX_PRESENCE_WAIT_FOR_WORK_SINCE"), "Desktop launches carry a precise companion startup boundary");
+        async Task WaitFor(Func<bool> ready)
+        {
+            for (var attempt = 0; attempt < 60 && !ready(); attempt++) await Task.Delay(100);
+            Check(ready(), "Startup publication transition arrives within the polling window");
+        }
+        try
+        {
+            await isolated.Start();
+            Check(B(isolated.Snapshot?["startup_waiting"]) && !B(isolated.Snapshot?["presence_enabled"]) && S(isolated.Snapshot?["discord_status"]) == "Waiting for new Codex activity", "Restored working sessions stay hidden at companion startup");
+            await isolated.Stop(); await isolated.Start();
+            Check(B(isolated.Snapshot?["startup_waiting"]), "Engine restart before a new prompt preserves startup hiding");
+            var sessionFile = Directory.GetFiles(Path.Combine(backend.Options.CodexHome, "sessions"), "fixture.jsonl", SearchOption.AllDirectories).Single();
+            void Append(object payload)
+                => File.AppendAllText(sessionFile, JsonSerializer.Serialize(new { type = "event_msg", timestamp = DateTimeOffset.UtcNow.ToString("O"), payload }) + Environment.NewLine);
+            var previous = isolated.Snapshot;
+            Append(new { type = "token_count", info = new { } });
+            await WaitFor(() => !ReferenceEquals(previous, isolated.Snapshot));
+            Check(B(isolated.Snapshot?["startup_waiting"]), "Background token updates cannot unlock startup publication");
+            Append(new { type = "user_message", message = "Startup verification prompt" });
+            await WaitFor(() => !B(isolated.Snapshot?["startup_waiting"]));
+            Check(!isolated.WaitForNewWork && !isolated.CreateStartInfo("desktop-bridge --observe").Environment.ContainsKey("CODEX_PRESENCE_WAIT_FOR_WORK_SINCE"), "New prompt unlocks publication without changing saved settings");
+            await isolated.SetPriorityHold(true);
+            await WaitFor(() => B(isolated.Snapshot?["priority_held"]));
+            Check(!B(isolated.Snapshot?["presence_enabled"]), "Game priority still suppresses publication after startup unlocks");
+            await isolated.SetPriorityHold(false);
+            await isolated.Stop(); await isolated.Start();
+            Check(!B(isolated.Snapshot?["startup_waiting"]), "Engine restart after work keeps the companion unlocked");
+            await isolated.Stop();
+            var reopened = new Backend(root, backend.Options, true);
+            try
+            {
+                await reopened.Start();
+                Check(B(reopened.Snapshot?["startup_waiting"]), "Reopening the companion waits for another fresh prompt");
+            }
+            finally { await reopened.Stop(); }
+            var emptyHome = Path.Combine(backend.Options.CodexHome, "StartupEmptyHome");
+            Directory.CreateDirectory(Path.Combine(emptyHome, "sessions"));
+            var empty = new Backend(root, new Preferences { CodexHome = emptyHome, MonitorOnly = true }, true);
+            try
+            {
+                await empty.Start();
+                Check(B(empty.Snapshot?["startup_waiting"]) && !B(empty.Snapshot?["presence_enabled"]) && empty.Snapshot?["sessions"] is JsonArray sessions && sessions.Count == 0, "Startup with no sessions cannot publish an idle card");
+            }
+            finally { await empty.Stop(); }
+        }
+        finally { await isolated.Stop(); }
     }
 
     private async Task VerifyLive()
     {
         var configBeforeStart = File.Exists(backend.ConfigPath) ? File.ReadAllText(backend.ConfigPath) : null;
         if (!backend.Running) await StartEngine();
-        for (var attempt = 0; attempt < 20 && !S(backend.Snapshot?["discord_status"]).StartsWith("Connected", StringComparison.OrdinalIgnoreCase); attempt++) await Task.Delay(500);
+        for (var attempt = 0; attempt < 20 && backend.Snapshot == null; attempt++) await Task.Delay(500);
         var evidence = Path.Combine(root, "Data", "Verification");
         Directory.CreateDirectory(evidence);
         var connected = S(backend.Snapshot?["discord_status"]).StartsWith("Connected", StringComparison.OrdinalIgnoreCase);
-        File.WriteAllText(Path.Combine(evidence, "live-results.json"), JsonSerializer.Serialize(new { connected, status = S(backend.Snapshot?["discord_status"]), running = backend.Running, hidden = !IsVisible, everShown, trayVisible = tray.Visible, configUnchangedOnStart = configBeforeStart != null && File.ReadAllText(backend.ConfigPath) == configBeforeStart, application = S(backend.Snapshot?["preview"]?["app_name"]), sessions = backend.Snapshot?["sessions"]?.AsArray().Count ?? 0 }, Backend.JsonOptions));
+        File.WriteAllText(Path.Combine(evidence, "live-results.json"), JsonSerializer.Serialize(new { connected, startupWaiting = B(backend.Snapshot?["startup_waiting"]), presenceVisible = B(backend.Snapshot?["presence_enabled"]), status = S(backend.Snapshot?["discord_status"]), running = backend.Running, hidden = !IsVisible, everShown, trayVisible = tray.Visible, configUnchangedOnStart = configBeforeStart != null && File.ReadAllText(backend.ConfigPath) == configBeforeStart, application = S(backend.Snapshot?["preview"]?["app_name"]), sessions = backend.Snapshot?["sessions"]?.AsArray().Count ?? 0 }, Backend.JsonOptions));
         Footer.Text = connected ? "Connected to Discord · presence is live." : "Engine started · " + S(backend.Snapshot?["discord_status"]);
         if (!args.Contains("--verify-background")) ShowDashboard();
     }

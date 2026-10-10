@@ -747,6 +747,21 @@ fn run_headless_foreground(
     Ok(())
 }
 
+struct StartupPublicationGate {
+    waiting_since: Option<DateTime<Utc>>,
+}
+
+impl StartupPublicationGate {
+    fn observe(&mut self, work_started_at: impl Iterator<Item = DateTime<Utc>>) -> bool {
+        if let Some(since) = self.waiting_since
+            && work_started_at.into_iter().any(|started| started > since)
+        {
+            self.waiting_since = None;
+        }
+        self.waiting_since.is_some()
+    }
+}
+
 pub fn run_desktop_bridge(
     mut config: PresenceConfig,
     runtime: RuntimeSettings,
@@ -758,6 +773,15 @@ pub fn run_desktop_bridge(
     let stop = install_stop_signal()?;
     let input_stop = Arc::clone(&stop);
     let priority = Arc::new(AtomicBool::new(priority_hold));
+    let mut startup_gate = StartupPublicationGate {
+        waiting_since: env::var("CODEX_PRESENCE_WAIT_FOR_WORK_SINCE")
+            .ok()
+            .map(|value| {
+                DateTime::parse_from_rfc3339(&value)
+                    .map(|timestamp| timestamp.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now())
+            }),
+    };
     let input_priority = Arc::clone(&priority);
     let (wake_sender, wake_receiver) = std::sync::mpsc::channel();
     thread::spawn(move || {
@@ -791,12 +815,18 @@ pub fn run_desktop_bridge(
             &mut plan_detector,
         )?;
         let priority_held = priority.load(Ordering::Relaxed);
+        let startup_waiting = startup_gate.observe(
+            snapshot
+                .sessions
+                .iter()
+                .filter_map(|session| session.activity.as_ref()?.last_work_started_at),
+        );
         let active = snapshot.active_session();
         let idle_remaining =
             discord.idle_timeout_remaining_at(active, &config, Utc::now().timestamp());
         let idle_hidden = idle_remaining == Some(0);
         if !observe {
-            if priority_held {
+            if priority_held || startup_waiting {
                 let mut publication = config.clone();
                 publication.presence_enabled = false;
                 publish_runtime_snapshot(
@@ -832,9 +862,10 @@ pub fn run_desktop_bridge(
         let value = serde_json::json!({
             "schema_version": 1,
             "snapshot_at": Utc::now(),
-            "discord_status": if priority_held { "Priority app active · Codex presence cleared" } else if idle_hidden { "Hidden · idle timeout reached" } else if observe { "Monitoring only" } else { discord.status() },
+            "discord_status": if startup_waiting { "Waiting for new Codex activity" } else if priority_held { "Priority app active · Codex presence cleared" } else if idle_hidden { "Hidden · idle timeout reached" } else if observe { "Monitoring only" } else { discord.status() },
             "discord_application_id": config.effective_client_id_for_surface(surface),
-            "presence_enabled": config.presence_enabled && !observe && !priority_held && !idle_hidden,
+            "presence_enabled": config.presence_enabled && !observe && !priority_held && !idle_hidden && !startup_waiting,
+            "startup_waiting": startup_waiting,
             "publication_enabled": config.presence_enabled,
             "monitoring_only": observe,
             "priority_held": priority_held,
@@ -1558,6 +1589,28 @@ fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interva
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_publication_waits_for_new_work_and_stays_unlocked() {
+        let since = DateTime::parse_from_rfc3339("2026-10-10T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut gate = StartupPublicationGate {
+            waiting_since: Some(since),
+        };
+        assert!(gate.observe(std::iter::empty()));
+        assert!(gate.observe([since - chrono::Duration::seconds(1), since].into_iter()));
+        assert!(!gate.observe([since + chrono::Duration::milliseconds(1)].into_iter()));
+        assert!(!gate.observe(std::iter::empty()));
+    }
+
+    #[test]
+    fn ungated_terminal_publication_preserves_existing_behavior() {
+        let mut gate = StartupPublicationGate {
+            waiting_since: None,
+        };
+        assert!(!gate.observe(std::iter::empty()));
+    }
 
     #[test]
     fn opencode_process_lineage_selects_codex_app_surface() {

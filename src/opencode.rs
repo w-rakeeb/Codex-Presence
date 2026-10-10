@@ -496,6 +496,7 @@ fn activity(
     pending_calls: usize,
 ) -> SessionActivitySnapshot {
     SessionActivitySnapshot {
+        last_work_started_at: None,
         kind,
         target,
         observed_at,

@@ -64,6 +64,8 @@ pub enum SessionActivityKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionActivitySnapshot {
+    #[serde(default)]
+    pub last_work_started_at: Option<DateTime<Utc>>,
     pub kind: SessionActivityKind,
     pub target: Option<String>,
     pub observed_at: Option<DateTime<Utc>>,
@@ -661,6 +663,73 @@ mod tests {
     use chrono::TimeZone;
     use tempfile::TempDir;
 
+    #[test]
+    fn only_prompts_and_task_starts_unlock_startup_publication() {
+        let meta = r#"{"type":"session_meta","timestamp":"2026-10-10T00:00:00Z","payload":{"id":"startup-test","cwd":"/test"}}"#;
+        let timestamp = "2026-10-10T00:01:00Z";
+        for payload in [
+            serde_json::json!({"type":"user_message","message":"Hello"}),
+            serde_json::json!({"type":"task_started"}),
+        ] {
+            let input = format!(
+                "{meta}\n{}\n",
+                serde_json::json!({"type":"event_msg","timestamp":timestamp,"payload":payload})
+            );
+            let snapshot = parse_one(&input);
+            assert_eq!(
+                snapshot
+                    .activity
+                    .unwrap()
+                    .last_work_started_at
+                    .unwrap()
+                    .to_rfc3339(),
+                "2026-10-10T00:01:00+00:00"
+            );
+        }
+        let input = format!(
+            "{meta}\n{}\n",
+            serde_json::json!({"type":"response_item","timestamp":timestamp,"payload":{"type":"message","role":"user","content":[]}})
+        );
+        assert!(
+            parse_one(&input)
+                .activity
+                .unwrap()
+                .last_work_started_at
+                .is_some()
+        );
+        for payload in [
+            serde_json::json!({"type":"agent_reasoning","text":"restored work"}),
+            serde_json::json!({"type":"agent_message","message":"completed"}),
+            serde_json::json!({"type":"token_count","info":{}}),
+            serde_json::json!({"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.4"}}),
+        ] {
+            let input = format!(
+                "{meta}\n{}\n",
+                serde_json::json!({"type":"event_msg","timestamp":timestamp,"payload":payload})
+            );
+            assert!(
+                parse_one(&input)
+                    .activity
+                    .and_then(|activity| activity.last_work_started_at)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn completed_turn_keeps_the_prompt_timestamp() {
+        let input = r#"{"type":"session_meta","timestamp":"2026-10-10T00:00:00Z","payload":{"id":"startup-test","cwd":"/test"}}
+{"type":"event_msg","timestamp":"2026-10-10T00:01:00Z","payload":{"type":"user_message","message":"Hello"}}
+{"type":"response_item","timestamp":"2026-10-10T00:02:00Z","payload":{"type":"message","role":"assistant","content":[]}}
+"#;
+        let activity = parse_one(input).activity.unwrap();
+        assert_eq!(activity.kind, SessionActivityKind::WaitingInput);
+        assert_eq!(
+            activity.last_work_started_at.unwrap().to_rfc3339(),
+            "2026-10-10T00:01:00+00:00"
+        );
+    }
+
     fn parse_one(content: &str) -> CodexSessionSnapshot {
         let tmp = TempDir::new().expect("temp dir");
         let file_path = tmp.path().join("session.jsonl");
@@ -718,6 +787,7 @@ mod tests {
                 last_effective_signal_at: Some(Utc::now()),
                 idle_candidate_at: None,
                 pending_calls: 0,
+                last_work_started_at: None,
             }),
             started_at: None,
             last_token_event_at: None,

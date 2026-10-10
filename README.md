@@ -8,7 +8,7 @@ A small Windows desktop companion that publishes your Codex activity to Discord.
 
 1. Download the Windows x64 ZIP from Releases and extract the entire folder.
 2. Install the [Microsoft .NET 8 Desktop Runtime for x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) if Windows asks for it. The SDK is only needed to build from source.
-3. Open **Codex Presence.exe**, start Discord, and select **Start presence**.
+3. Open **Codex Presence.exe**, start Discord, and select **Start presence**. Send a new Codex prompt to begin showing your activity.
 4. Choose your visible fields in **Privacy** and **Layout**. Use **Settings** for appearance, timers and background startup.
 
 You can create a desktop shortcut from **Tools**. Reopen the executable to show a hidden window. Extract updates into a new folder after exiting the previous version; keep your `Data` folder if you want to retain desktop preferences.
@@ -26,6 +26,7 @@ The release is tested on Windows 11 x64. It uses Windows 10 compatible controls,
 - Optional desktop priority for known games, running Steam games and selected applications; Codex yields without stopping local monitoring.
 - Settings that retain unsaved changes when you switch tabs. Saving one tab preserves changes already saved on another.
 - Background startup with Codex, optional tray visibility, and a hidden window that can always be reopened.
+- Startup stays silent on Discord until you send a new Codex prompt or begin a task; restored chats cannot publish an idle card.
 - Five interface styles: Minimal, Soft, Rounded, Paper and Studio. Every style supports independent dark and light modes.
 - Three additional color themes: Slate, Forest and Dusk, each with dark and light variants and immediate previews.
 - Settings grouped into Appearance, Activity, Background and Advanced, with consistent navigation icons and dependent controls.

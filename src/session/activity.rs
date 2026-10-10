@@ -72,6 +72,7 @@ const IDLE_DEBOUNCE_SECS: i64 = 45;
 
 #[derive(Debug, Default)]
 struct ActivityTracker {
+    last_work_started_at: Option<DateTime<Utc>>,
     snapshot: Option<SessionActivitySnapshot>,
     pending_calls: HashMap<String, PendingActivity>,
     last_event_at: Option<DateTime<Utc>>,
@@ -114,6 +115,7 @@ impl ActivityTracker {
         };
 
         self.snapshot = Some(SessionActivitySnapshot {
+            last_work_started_at: self.last_work_started_at,
             kind,
             target,
             observed_at,
@@ -288,6 +290,15 @@ impl SessionAccumulator {
                 }
             }
             Some("event_msg") => match str_at(payload, &["type"]).as_deref() {
+                Some("user_message") | Some("task_started") => {
+                    self.activity_tracker.last_work_started_at =
+                        max_datetime(self.activity_tracker.last_work_started_at, event_timestamp);
+                    self.activity_tracker.mark_activity(
+                        SessionActivityKind::Thinking,
+                        None,
+                        event_timestamp,
+                    );
+                }
                 Some("thread_settings_applied") => {
                     let settings = payload.get("thread_settings").unwrap_or(&Value::Null);
                     if let Some(cwd) = str_at(settings, &["cwd"]) {
@@ -407,6 +418,15 @@ impl SessionAccumulator {
                 _ => {}
             },
             Some("response_item") => match str_at(payload, &["type"]).as_deref() {
+                Some("message") if str_at(payload, &["role"]).as_deref() == Some("user") => {
+                    self.activity_tracker.last_work_started_at =
+                        max_datetime(self.activity_tracker.last_work_started_at, event_timestamp);
+                    self.activity_tracker.mark_activity(
+                        SessionActivityKind::Thinking,
+                        None,
+                        event_timestamp,
+                    );
+                }
                 Some("reasoning") => {
                     self.activity_tracker.mark_activity(
                         SessionActivityKind::Thinking,

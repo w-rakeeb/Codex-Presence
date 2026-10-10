@@ -1957,6 +1957,7 @@ mod tests {
         session.activity = Some(crate::session::SessionActivitySnapshot {
             kind: SessionActivityKind::RunningCommand,
             pending_calls: 1,
+            last_work_started_at: None,
             observed_at: chrono::DateTime::from_timestamp(170, 0),
             ..Default::default()
         });
@@ -2494,6 +2495,7 @@ mod tests {
             last_effective_signal_at: None,
             idle_candidate_at: None,
             pending_calls: 0,
+            last_work_started_at: None,
         });
         let config = inline_config();
         let plan = resolved_plan_pro();
@@ -2534,6 +2536,7 @@ mod tests {
             last_effective_signal_at: None,
             idle_candidate_at: None,
             pending_calls: 0,
+            last_work_started_at: None,
         });
         let config = inline_config();
         let plan = resolved_plan_pro();
@@ -2988,6 +2991,7 @@ mod tests {
             last_effective_signal_at: None,
             idle_candidate_at: None,
             pending_calls: 0,
+            last_work_started_at: None,
         });
         let mut config = inline_config();
         config.privacy.show_git_branch = false;
@@ -3080,6 +3084,7 @@ mod tests {
             last_effective_signal_at: None,
             idle_candidate_at: None,
             pending_calls: 0,
+            last_work_started_at: None,
         });
         let mut config = inline_config();
         config.display.activity_small_image_keys.thinking = Some("thinking-icon".to_string());

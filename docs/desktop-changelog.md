@@ -1,5 +1,10 @@
 # Desktop release notes
 
+## 1.9.1
+
+- Keep automatic startup and background monitoring, but hide Discord presence until a new Codex prompt or task starts after the companion opens. Restored chats, metadata updates and token refreshes cannot unlock it.
+- Preserve the startup gate across engine restarts, and retain normal idle timeout, manual Pause and game priority after work begins.
+
 ## 1.9.0
 
 - Load Settings sections only when opened, retaining their controls, unsaved values and validation when moving between sections or tabs.
