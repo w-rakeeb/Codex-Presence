@@ -6,6 +6,7 @@
 <SolidColorBrush x:Key="Hover" Color="#25272C"/>
 <SolidColorBrush x:Key="Line" Color="#12FFFFFF"/>
 <SolidColorBrush x:Key="Text" Color="#ECEDEF"/>
+<SolidColorBrush x:Key="SelectedText" Color="#ECEDEF"/>
 <SolidColorBrush x:Key="Secondary" Color="#A7ABB3"/>
 <SolidColorBrush x:Key="Muted" Color="#9CA2AC"/>
 <SolidColorBrush x:Key="Disabled" Color="#767B85"/>
@@ -42,6 +43,7 @@
 <SolidColorBrush x:Key="Hover" Color="#25374B"/>
 <SolidColorBrush x:Key="Line" Color="#12FFFFFF"/>
 <SolidColorBrush x:Key="Text" Color="#F1F5FB"/>
+<SolidColorBrush x:Key="SelectedText" Color="#F1F5FB"/>
 <SolidColorBrush x:Key="Secondary" Color="#B9C5D6"/>
 <SolidColorBrush x:Key="Muted" Color="#9CA2AC"/>
 <SolidColorBrush x:Key="Disabled" Color="#767B85"/>
@@ -78,6 +80,7 @@
 <SolidColorBrush x:Key="Hover" Color="#253B2C"/>
 <SolidColorBrush x:Key="Line" Color="#12FFFFFF"/>
 <SolidColorBrush x:Key="Text" Color="#EAF6ED"/>
+<SolidColorBrush x:Key="SelectedText" Color="#EAF6ED"/>
 <SolidColorBrush x:Key="Secondary" Color="#B7CBBE"/>
 <SolidColorBrush x:Key="Muted" Color="#9CA2AC"/>
 <SolidColorBrush x:Key="Disabled" Color="#767B85"/>
@@ -114,6 +117,7 @@
 <SolidColorBrush x:Key="Hover" Color="#3B2C47"/>
 <SolidColorBrush x:Key="Line" Color="#12FFFFFF"/>
 <SolidColorBrush x:Key="Text" Color="#F8EFFA"/>
+<SolidColorBrush x:Key="SelectedText" Color="#F8EFFA"/>
 <SolidColorBrush x:Key="Secondary" Color="#CFC0D4"/>
 <SolidColorBrush x:Key="Muted" Color="#9CA2AC"/>
 <SolidColorBrush x:Key="Disabled" Color="#767B85"/>
@@ -150,6 +154,7 @@
 <SolidColorBrush x:Key="Hover" Color="#E8EBF0"/>
 <SolidColorBrush x:Key="Line" Color="#14000000"/>
 <SolidColorBrush x:Key="Text" Color="#1F2124"/>
+<SolidColorBrush x:Key="SelectedText" Color="#1F2124"/>
 <SolidColorBrush x:Key="Secondary" Color="#4E5058"/>
 <SolidColorBrush x:Key="Muted" Color="#5B616C"/>
 <SolidColorBrush x:Key="Disabled" Color="#747985"/>
@@ -186,6 +191,7 @@
 <SolidColorBrush x:Key="Hover" Color="#E1E9F3"/>
 <SolidColorBrush x:Key="Line" Color="#14000000"/>
 <SolidColorBrush x:Key="Text" Color="#172337"/>
+<SolidColorBrush x:Key="SelectedText" Color="#172337"/>
 <SolidColorBrush x:Key="Secondary" Color="#495B73"/>
 <SolidColorBrush x:Key="Muted" Color="#5B616C"/>
 <SolidColorBrush x:Key="Disabled" Color="#747985"/>
@@ -222,6 +228,7 @@
 <SolidColorBrush x:Key="Hover" Color="#DFE9E0"/>
 <SolidColorBrush x:Key="Line" Color="#14000000"/>
 <SolidColorBrush x:Key="Text" Color="#193320"/>
+<SolidColorBrush x:Key="SelectedText" Color="#193320"/>
 <SolidColorBrush x:Key="Secondary" Color="#4D6654"/>
 <SolidColorBrush x:Key="Muted" Color="#5B616C"/>
 <SolidColorBrush x:Key="Disabled" Color="#747985"/>
@@ -258,6 +265,7 @@
 <SolidColorBrush x:Key="Hover" Color="#E8DDED"/>
 <SolidColorBrush x:Key="Line" Color="#14000000"/>
 <SolidColorBrush x:Key="Text" Color="#34233E"/>
+<SolidColorBrush x:Key="SelectedText" Color="#34233E"/>
 <SolidColorBrush x:Key="Secondary" Color="#66526F"/>
 <SolidColorBrush x:Key="Muted" Color="#5B616C"/>
 <SolidColorBrush x:Key="Disabled" Color="#747985"/>
@@ -334,7 +342,7 @@
    <Setter Property="ScrollViewer.CanContentScroll" Value="True"/><Setter Property="KeyboardNavigation.TabNavigation" Value="Once"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox"><Grid><Border x:Name="FocusOutline" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource InputRadius}" IsHitTestVisible="False" Panel.ZIndex="1"/><ToggleButton Focusable="False" ClickMode="Press" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"><ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="DropDownChrome" Background="{DynamicResource Control}" BorderBrush="{DynamicResource InputLine}" BorderThickness="1" CornerRadius="{DynamicResource InputRadius}"><Path Data="M0,0 L4,4 L8,0" Stroke="{DynamicResource Text}" StrokeThickness="1.3" Width="8" Height="5" HorizontalAlignment="Right" Margin="0,0,13,0"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="DropDownChrome" Property="Background" Value="{DynamicResource Hover}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="DropDownChrome" Property="Background" Value="{DynamicResource Pressed}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template></ToggleButton><ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="10,9,28,9" IsHitTestVisible="False"/><Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" AllowsTransparency="True" Focusable="False" PopupAnimation="None"><Border Background="{DynamicResource Control}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="{DynamicResource InputRadius}" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Padding="3"><ScrollViewer MaxHeight="270" CanContentScroll="True" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter x:Name="ItemsPresenter" KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer></Border></Popup></Grid><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="FocusOutline" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
-  <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="{DynamicResource Text}"/><Setter Property="Padding" Value="10,8"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem"><Border x:Name="Item" Padding="{TemplateBinding Padding}" Background="Transparent" CornerRadius="{DynamicResource InputRadius}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Selected}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Selected}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+  <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="{DynamicResource Text}"/><Setter Property="Padding" Value="10,8"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem"><Border x:Name="Item" Padding="{TemplateBinding Padding}" Background="Transparent" CornerRadius="{DynamicResource InputRadius}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Selected}"/><Setter Property="Foreground" Value="{DynamicResource SelectedText}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Selected}"/><Setter Property="Foreground" Value="{DynamicResource SelectedText}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
 
   <Style TargetType="ScrollBar"><Setter Property="Width" Value="8"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Grid Background="{DynamicResource Canvas}"><Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True"><Track.DecreaseRepeatButton><RepeatButton x:Name="Before" Command="ScrollBar.PageUpCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton><Track.Thumb><Thumb MinHeight="24"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="{DynamicResource Scrollbar}" CornerRadius="4" Margin="2,0"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton x:Name="After" Command="ScrollBar.PageDownCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton></Track></Grid><ControlTemplate.Triggers><Trigger Property="Orientation" Value="Horizontal"><Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/><Setter TargetName="Before" Property="Command" Value="ScrollBar.PageLeftCommand"/><Setter TargetName="After" Property="Command" Value="ScrollBar.PageRightCommand"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter><Style.Triggers><Trigger Property="Orientation" Value="Horizontal"><Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="8"/></Trigger></Style.Triggers></Style>
  
@@ -342,7 +350,7 @@
 <Style x:Key="TabButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
  <Setter Property="BorderThickness" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Secondary}"/>
  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Grid><Border x:Name="TabSurface" Background="{TemplateBinding Background}" CornerRadius="6,6,0,0" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><Border x:Name="Underline" Height="2" VerticalAlignment="Bottom" Background="Transparent" Margin="8,0"/></Grid><ControlTemplate.Triggers>
- <Trigger Property="Tag" Value="ActiveTab"><Setter TargetName="TabSurface" Property="Background" Value="{DynamicResource Selected}"/><Setter TargetName="Underline" Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource Text}"/></Trigger>
+ <Trigger Property="Tag" Value="ActiveTab"><Setter TargetName="TabSurface" Property="Background" Value="{DynamicResource Selected}"/><Setter TargetName="Underline" Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource SelectedText}"/></Trigger>
  <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabSurface" Property="Background" Value="{DynamicResource Hover}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="TabSurface" Property="Background" Value="{DynamicResource Pressed}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
 </Style>
 <Style x:Key="QuietDangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Danger}"/><Setter Property="Background" Value="{DynamicResource DangerBg}"/></Trigger></Style.Triggers></Style>

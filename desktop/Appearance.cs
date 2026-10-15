@@ -29,6 +29,7 @@ public static class Appearance
             foreach (var key in new[] { "Text", "Secondary", "Muted", "Disabled", "Neutral", "Success", "Warning", "Danger", "Error", "InputLine", "Line", "Scrollbar" }) window.Resources[key] = SystemColors.WindowTextBrush;
             foreach (var key in new[] { "Accent", "AccentHover", "AccentPressed", "Selected", "Selection", "FocusRing", "DataInput", "DataCached", "DataOutput" }) window.Resources[key] = SystemColors.HighlightBrush;
             window.Resources["OnAccent"] = SystemColors.HighlightTextBrush;
+            window.Resources["SelectedText"] = SystemColors.HighlightTextBrush;
         }
         var handle = new WindowInteropHelper(window).Handle;
         if (handle != IntPtr.Zero && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))

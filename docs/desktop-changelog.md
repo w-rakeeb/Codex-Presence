@@ -1,5 +1,9 @@
 # Desktop release notes
 
+## 2.0.1
+
+- Use the Windows highlight text brush for selected tabs and dropdown items in custom high-contrast themes. The 2.0 redesign and engine/settings contracts remain unchanged.
+
 ## 2.0.0
 
 - Redesign the WPF shell with graphite layers, indigo actions, segmented navigation, a sticky footer and a pinned Layout preview.

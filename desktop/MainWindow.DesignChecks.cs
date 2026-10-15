@@ -100,6 +100,7 @@ public partial class MainWindow
             Appearance.Apply(this, new Preferences(), true);
             foreach (var target in navigation.Keys) { Fresh(target); Capture(target + "-high-contrast"); }
             Check(ReferenceEquals(FindResource("Text"), SystemColors.WindowTextBrush) && ReferenceEquals(FindResource("Accent"), SystemColors.HighlightBrush), "High contrast uses Windows text, canvas and highlight brushes");
+            Check(ReferenceEquals(FindResource("SelectedText"), SystemColors.HighlightTextBrush), "Selected controls use the Windows high-contrast highlight text color");
             Appearance.Apply(this, new Preferences()); Fresh("Overview");
             var preview = Elements<Border>(PageBody).Single(border => border.Tag?.ToString() == "DiscordPreview");
             var text = Elements<TextBlock>(preview).Select(block => block.Text).ToArray();
