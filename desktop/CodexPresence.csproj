@@ -7,9 +7,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>Codex Presence</AssemblyName>
-    <Version>1.9.1</Version>
+    <Version>2.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <StartupObject>CodexPresence.Program</StartupObject>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
@@ -18,4 +18,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\*.png;Assets\*.ico" />
+  </ItemGroup>
 </Project>

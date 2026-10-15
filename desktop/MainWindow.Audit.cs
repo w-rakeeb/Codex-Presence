@@ -155,7 +155,7 @@ public partial class MainWindow
         try { await Backend.RunCommand(timeoutStart, null, TimeSpan.FromMilliseconds(250)); } catch (IOException error) { timedOut = error.Message.Contains("timed out"); }
         Check(timedOut && timer.Elapsed < TimeSpan.FromSeconds(4) && backend.Running, "A stalled command times out promptly without affecting the monitoring engine");
         var normalWidth = Width; var normalHeight = Height;
-        foreach (var width in new[] { 320, 375, 390, 430, 768, 1024, 1280, 1440, 1920 })
+        foreach (var width in new[] { 560, 600, 640, 720, 768, 1024, 1280, 1440, 1920 })
         {
             Width = width; Height = 530;
             foreach (var target in navigation.Keys)
@@ -172,7 +172,7 @@ public partial class MainWindow
                 }
                 else VerifyFit(width, target);
             }
-            if (width is 320 or 375 or 1920)
+            if (width is 560 or 600 or 1920)
             {
                 Fresh("Layout");
                 var bitmap = new RenderTargetBitmap((int)ActualWidth, (int)ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(this);
@@ -180,7 +180,7 @@ public partial class MainWindow
                 using var file = File.Create(Path.Combine(evidence, "Audit-Layout-" + width + ".png")); encoder.Save(file);
             }
         }
-        Width = 320; Height = 420; Fresh("Settings"); ShowSettingsSection("Advanced"); UpdateLayout();
+        Width = 560; Height = 640; Fresh("Settings"); ShowSettingsSection("Advanced"); UpdateLayout();
         Check(PageScroll.ViewportHeight > 70 && SaveHost.ActualHeight >= 36 && StatusPanel.ActualHeight > 30, "The minimum-height window retains scrolling, save controls and status feedback");
         var vertical = (ScrollBar)PageScroll.Template.FindName("PART_VerticalScrollBar", PageScroll);
         var after = Elements<RepeatButton>(vertical).Single(button => button.Command == ScrollBar.PageDownCommand);

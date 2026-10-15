@@ -1,5 +1,13 @@
 # Codex Presence — A to Z
 
+## Desktop 2.0 interface
+
+Overview shows engine status, the exact saved Discord text and usage tiles. The primary action is Start engine, Pause or Resume; background and Exit are in the overflow menu. Layout keeps the saved preview pinned while controls scroll. Settings groups are Appearance, Behavior, Startup and Advanced.
+
+Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
+
+Right-click a stat value to copy its full number. Arrow keys move between focused navigation tabs; Ctrl+1 through Ctrl+5 select a tab, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete visual design and QA limits are in `docs/desktop-design.md` in the source checkout.
+
 ## Open and start
 
 Extract the release zip, keep its files together and open **Codex Presence.exe**. Keep Discord desktop open, then click **Start presence**. Tools can create a desktop shortcut. Codex activity is detected from local session files. The default home is `%USERPROFILE%\.codex`, or the inherited `CODEX_HOME` environment variable. No Discord token or bot setup is needed.

@@ -94,6 +94,7 @@ public partial class MainWindow : Window
             options.CloseToTray = false;
         }
         backend = new Backend(root, options, testMode) { WaitForNewWork = !testMode };
+        InitializePresentation();
         Appearance.Apply(this, options);
         SizeChanged += (_, _) => UpdateResponsiveLayout();
         refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -111,7 +112,8 @@ public partial class MainWindow : Window
         {
             var button = ActionButton(name, () => Navigate(name));
             button.Content = NavigationContent(name, button);
-            button.FontSize = 12.5;
+            button.Style = (Style)FindResource("TabButton");
+            button.FontSize = 13;
             button.Padding = new Thickness(2, 8, 2, 8);
             button.Margin = new Thickness(2, 0, 2, 0);
             navigation[name] = button;
@@ -134,6 +136,7 @@ public partial class MainWindow : Window
         backend.Updated += snapshot => Dispatcher.BeginInvoke(() =>
         {
             if (closing) return;
+            UpdateTrayPresentation(EnginePresentation(snapshot));
             if (tray.Visible) { var text = "Codex Presence · " + S(snapshot["discord_status"]); text = text.Substring(0, Math.Min(63, text.Length)); if (tray.Text != text) tray.Text = text; }
             if (IsVisible && page == "Overview") refreshTimer.Start();
         });
@@ -146,6 +149,7 @@ public partial class MainWindow : Window
         });
         backend.Exited += () => Dispatcher.BeginInvoke(() =>
         {
+            if (!closing) UpdateTrayPresentation(EnginePresentation(backend.Snapshot));
             if (page == "Overview" && IsVisible) RenderOverview();
             if (backend.LastError != null) Footer.Text = "The engine stopped unexpectedly. See Tools for details, then try Start presence.";
         });
@@ -174,7 +178,7 @@ public partial class MainWindow : Window
     {
         await backend.LoadConfig();
         initialized = true;
-        Navigate("Overview");
+        Navigate(!testMode && navigation.ContainsKey(windowPresentation.LastTab) ? windowPresentation.LastTab : "Overview");
         ApplyDesktopPreferences();
         if (args.Contains("--watch")) { Hide(); await CheckHost(); }
         else if (args.Contains("--startup") || (!testMode && backend.Options.StartInBackground)) await RunInBackground();
@@ -208,7 +212,8 @@ public partial class MainWindow : Window
                 if (terminalProcess is { HasExited: false }) { terminalProcess.Kill(); await terminalProcess.WaitForExitAsync(); }
                 await backend.Stop();
                 closing = true;
-                tray.Dispose();
+                if (!testMode) await SaveWindowPresentation();
+        tray.Dispose();
                 Application.Current.Shutdown(1);
             }
         }
@@ -230,6 +235,7 @@ public partial class MainWindow : Window
         overviewUpdates.Clear();
         overviewStart = overviewPause = overviewBackground = null;
         PageBody.Children.Clear();
+        PinnedPreviewHost.Child = null; PinnedPreviewHost.Visibility = Visibility.Collapsed;
         SaveHost.Child = null;
         SaveHost.Visibility = Visibility.Collapsed;
         collectValues.Clear();
@@ -242,8 +248,7 @@ public partial class MainWindow : Window
         foreach (var item in navigation)
         {
             item.Value.IsEnabled = initialized;
-            item.Value.SetResourceReference(BackgroundProperty, item.Key == page ? "Selected" : "Canvas");
-            item.Value.SetResourceReference(ForegroundProperty, item.Key == page ? "Accent" : "Muted");
+            item.Value.Tag = item.Key == page ? "ActiveTab" : "InactiveTab";
             item.Value.BorderThickness = new Thickness(0);
         }
         if (editors.TryGetValue(page, out var retained) && (retained.Dirty || JsonNode.DeepEquals(retained.Base, backend.Config)))
@@ -256,6 +261,7 @@ public partial class MainWindow : Window
             dirty = retained.Dirty;
             PageScroll.ScrollToVerticalOffset(retained.Offset);
             if (dirty) Footer.Text = "Unsaved changes on this tab.";
+            if (page == "Layout") AddEditorPreview();
             RecordInteractiveState();
             UpdateResponsiveLayout();
             UpdateActionAvailability();
@@ -273,10 +279,13 @@ public partial class MainWindow : Window
         RecordInteractiveState();
         UpdateResponsiveLayout();
         UpdateActionAvailability();
+        AnimatePage();
+        if (!testMode) _ = SaveWindowPresentation();
     }
 
     private void RecordInteractiveState()
     {
+        if (!testMode && initialized) _ = SaveWindowPresentation();
         if (!args.Contains("--interactive-test")) return;
         var evidence = Path.Combine(root, "Data", "Verification"); Directory.CreateDirectory(evidence);
         File.WriteAllText(Path.Combine(evidence, "interactive-results.json"), JsonSerializer.Serialize(new { page, settingsSection, dirty, options = backend.Options, selected = Elements<ComboBox>(PageBody).Select(combo => new { name = AutomationProperties.GetName(combo), value = combo.SelectedValue }), pendingTabs = editors.Where(pair => pair.Value.Dirty).Select(pair => pair.Key), config = backend.Config }, Backend.JsonOptions));
@@ -284,7 +293,7 @@ public partial class MainWindow : Window
 
     private TextBlock Text(string value, double size = 14, Brush? color = null)
     {
-        var block = new TextBlock { Text = value, FontSize = Math.Max(13, size), TextWrapping = TextWrapping.Wrap };
+        var block = new TextBlock { Text = value, FontSize = Math.Max(12, size), TextWrapping = TextWrapping.Wrap };
         block.SetResourceReference(TextBlock.ForegroundProperty, color == null ? "Text" : ReferenceEquals(color, Accent) ? "Accent" : "Muted");
         return block;
     }
@@ -300,7 +309,7 @@ public partial class MainWindow : Window
         foreach (var item in navigation)
         {
             var label = (TextBlock)((StackPanel)item.Value.Content).Children[1];
-            var next = item.Key + ((item.Key == page && dirty) || (item.Key != page && editors.TryGetValue(item.Key, out var editor) && editor.Dirty) ? " •" : "");
+            var next = item.Key + ((item.Key == page && dirty) || (item.Key != page && editors.TryGetValue(item.Key, out var editor) && editor.Dirty) ? " ·" : "");
             if (label.Text != next) label.Text = next;
         }
     }
@@ -324,7 +333,15 @@ public partial class MainWindow : Window
 
     private Button AsyncButton(string title, Func<Task> action)
     {
-        var button = ActionButton(title, () => _ = Guard(action));
+        var button = new Button { Content = title };
+        AutomationProperties.SetName(button, title);
+        button.Click += async (_, _) =>
+        {
+            if (busy) return;
+            var previous = button.Content; pendingAction = button; button.Content = "Working…";
+            try { await Guard(action); }
+            finally { pendingAction = null; button.Content = previous; UpdateOverviewControls(); }
+        };
         button.Tag = "AsyncAction";
         button.IsEnabled = !busy;
         return button;
@@ -343,11 +360,11 @@ public partial class MainWindow : Window
             "Background" => "M3,4 L21,4 L21,18 L3,18 Z M8,22 L16,22 M12,18 L12,22 M7,8 L17,8 M7,12 L13,12",
             _ => "M14,3 Q19,1 22,6 L17,6 L15,9 L18,12 L22,11 Q23,16 17,18 L8,23 L3,18 L12,9 Q11,5 14,3 Z"
         };
-        var icon = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Width = 13, Height = 13, StrokeThickness = 1.4, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        var icon = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Width = 16, Height = 16, StrokeThickness = 1.5, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
         icon.SetBinding(System.Windows.Shapes.Path.StrokeProperty, new System.Windows.Data.Binding("Foreground") { Source = button });
         var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(icon);
-        var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center };
+        var label = new TextBlock { Text = name == "Background" ? "Startup" : name == "Activity" ? "Behavior" : name, VerticalAlignment = VerticalAlignment.Center };
         label.SetBinding(TextBlock.FontSizeProperty, new System.Windows.Data.Binding("FontSize") { Source = button });
         panel.Children.Add(label);
         return panel;
@@ -377,15 +394,14 @@ public partial class MainWindow : Window
     private StackPanel Card(string title, string? subtitle = null)
     {
         var inner = new StackPanel();
-        var heading = Text(Label(title.ToLowerInvariant()), backend.Options.InterfaceStyle == "soft" ? 17 : 14);
+        var heading = Text(title.Length > 0 ? char.ToUpperInvariant(title[0]) + title[1..].ToLowerInvariant() : title, 14);
         heading.SetResourceReference(TextBlock.FontFamilyProperty, "HeadingFont");
         heading.SetResourceReference(TextBlock.FontWeightProperty, "HeadingWeight");
         heading.SetResourceReference(TextBlock.FontSizeProperty, "CardTitleSize");
-        heading.Margin = new Thickness(0, 0, 0, 9);
+        heading.Margin = new Thickness(0, 0, 0, 12);
         inner.Children.Add(heading);
         if (subtitle != null) { var description = Text(subtitle, 11, Muted); description.Margin = new Thickness(0, 0, 0, 12); inner.Children.Add(description); }
-        var border = new Border { Child = inner };
-        foreach (var resource in new[] { (Border.BackgroundProperty, "Surface"), (Border.BorderBrushProperty, "Line"), (Border.BorderThicknessProperty, "CardBorder"), (Border.CornerRadiusProperty, "CardRadius"), (Border.PaddingProperty, "CardPadding"), (Border.MarginProperty, "CardSpacing") }) border.SetResourceReference(resource.Item1, resource.Item2);
+        var border = Surface(inner);
         PageBody.Children.Add(border);
         return inner;
     }
@@ -400,11 +416,11 @@ public partial class MainWindow : Window
 
     private void Row(Panel panel, string label, string value)
     {
-        var grid = new Grid { Margin = new Thickness(0, 5, 0, 5) };
+        var grid = new Grid { MinHeight = 40, Margin = new Thickness(0, 0, 0, 0) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.40, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.60, GridUnitType.Star) });
         var key = Text(label, 11, Muted); key.Margin = new Thickness(0, 0, 10, 0); grid.Children.Add(key);
-        var content = Text(value, 12); Grid.SetColumn(content, 1); grid.Children.Add(content);
+        var content = Text(value, 12); content.TextAlignment = TextAlignment.Right; Grid.SetColumn(content, 1); grid.Children.Add(content);
         panel.Children.Add(grid);
     }
 
@@ -422,36 +438,10 @@ public partial class MainWindow : Window
             overviewUpdates.Clear();
             PageBody.Children.Clear();
             Heading("Overview", "Discord connection and current session.");
-            var controls = new WrapPanel { Margin = new Thickness(0, 0, 0, 16) };
-            overviewStart = AsyncButton("Start presence", () => backend.Running ? StopEngine() : StartEngine());
-            overviewStart.Style = (Style)FindResource("PrimaryButton");
-            overviewPause = AsyncButton("Pause", TogglePresence);
-            overviewBackground = AsyncButton("Run in background", RunInBackground);
-            foreach (var button in new[] { overviewStart, overviewPause, overviewBackground }) { button.Margin = new Thickness(0, 0, 8, 6); controls.Children.Add(button); }
-            var exit = AsyncButton("Exit", ExitApp); exit.Margin = new Thickness(0, 0, 0, 6); controls.Children.Add(exit);
-            PageBody.Children.Add(controls);
-            var preview = Card("DISCORD PRESENCE");
-            preview.Children.Add(LiveText(ConnectionStatus, 13, Muted));
-            preview.Children.Add(LiveText(s => backend.Running && Number(s?["idle_timeout_remaining_seconds"]) is > 0 and var remaining && !B(s?["priority_held"]) ? "Inactive · hides in " + TimeSpan.FromSeconds(Math.Min(remaining, 86400)).ToString(@"hh\:mm\:ss") : "", 13, Muted));
-            var horizontal = new Grid { Margin = new Thickness(0, 14, 0, 0) };
-            horizontal.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) }); horizontal.ColumnDefinitions.Add(new ColumnDefinition());
-            var icon = new System.Windows.Shapes.Path { StrokeThickness = 1.6, Width = 22, Height = 22, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            icon.SetResourceReference(System.Windows.Shapes.Path.DataProperty, "BrandIcon"); icon.SetResourceReference(System.Windows.Shapes.Path.StrokeProperty, "Text");
-            var iconBox = new Border { Width = 40, Height = 40, BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
-            iconBox.SetResourceReference(Border.BackgroundProperty, "Control"); iconBox.SetResourceReference(Border.BorderBrushProperty, "Line"); iconBox.SetResourceReference(Border.CornerRadiusProperty, "InputRadius");
-            horizontal.Children.Add(iconBox);
-            var lines = new StackPanel(); Grid.SetColumn(lines, 1);
-            var title = LiveText(s => S(s?["preview"]?["app_name"], "Codex App"), 15); title.FontWeight = FontWeights.SemiBold; lines.Children.Add(title);
-            lines.Children.Add(LiveText(s => S(s?["preview"]?["details"], "Waiting for a session"), 12));
-            lines.Children.Add(LiveText(s => S(s?["preview"]?["state"], "Ready to connect"), 11, Muted)); horizontal.Children.Add(lines); preview.Children.Add(horizontal);
-            var usage = Card("SESSION USAGE");
-            LiveRow(usage, "Tokens", s => Count(s?["metrics"]?["totals"]?["total_tokens"]));
-            LiveRow(usage, "Known cost", s => Cost(s?["metrics"]?["totals"]?["known_cost_usd"], s?["metrics"]?["totals"]?["pricing_status"]));
-            LiveRow(usage, "Input / cached / output", s => Count(s?["metrics"]?["totals"]?["input_tokens"]) + " / " + Count(s?["metrics"]?["totals"]?["cached_input_tokens"]) + " / " + Count(s?["metrics"]?["totals"]?["output_tokens"]));
-            LiveRow(usage, "Cache hit", s => Number(s?["metrics"]?["totals"]?["cache_hit_ratio"]) is { } ratio ? Math.Clamp(ratio * 100, 0, 100).ToString("F1") + "%" : "Unavailable");
-            LiveRow(usage, "Plan", s => S(s?["plan"]));
-            LiveRow(usage, "Speed", s => Speed(s?["speed"]));
-            usage.Children.Add(LiveJsonViewer("Plan and speed details", s => new JsonObject { ["plan"] = s?["plan_details"]?.DeepClone(), ["speed"] = s?["service_tier"]?.DeepClone() }));
+            BuildEngineControlCard();
+            PageBody.Children.Add(SectionLabel("Live preview"));
+            PageBody.Children.Add(DiscordPreviewCard(overviewUpdates));
+            BuildSessionUsage();
             var sessionCard = Card("ACTIVE SESSIONS");
             if (sessions == null || sessions.Count == 0) sessionCard.Children.Add(LiveText(_ => backend.Starting ? "Reading Codex sessions…" : "No recent session. Open a Codex chat to see its activity here.", 13, Muted));
             else
@@ -519,11 +509,11 @@ public partial class MainWindow : Window
 
     private void LiveRow(Panel panel, string label, Func<JsonObject?, string> getter, ICollection<Action<JsonObject?>>? updates = null)
     {
-        var grid = new Grid { Margin = new Thickness(0, 5, 0, 5) };
+        var grid = new Grid { MinHeight = 40, Margin = new Thickness(0, 0, 0, 0) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.40, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.60, GridUnitType.Star) });
         var key = Text(label, 11, Muted); key.Margin = new Thickness(0, 0, 10, 0); grid.Children.Add(key);
-        var value = LiveText(getter, updates: updates); Typography.SetNumeralAlignment(value, FontNumeralAlignment.Tabular); Grid.SetColumn(value, 1); grid.Children.Add(value); panel.Children.Add(grid);
+        var value = LiveText(getter, updates: updates); Typography.SetNumeralAlignment(value, FontNumeralAlignment.Tabular); value.TextAlignment = TextAlignment.Right; Grid.SetColumn(value, 1); grid.Children.Add(value); panel.Children.Add(grid);
     }
 
     private Expander LiveJsonViewer(string title, Func<JsonObject?, JsonNode?> getter, ICollection<Action<JsonObject?>>? updates = null, string? key = null)
@@ -541,8 +531,24 @@ public partial class MainWindow : Window
 
     private void UpdateOverviewControls()
     {
-        if (overviewStart != null) { overviewStart.Content = backend.Running ? "Stop engine" : "Start presence"; AutomationProperties.SetName(overviewStart, overviewStart.Content.ToString()); overviewStart.IsEnabled = !busy && terminalProcess is not { HasExited: false }; }
-        if (overviewPause != null) { overviewPause.Content = backend.PublicationEnabled ? "Pause" : "Resume"; AutomationProperties.SetName(overviewPause, overviewPause.Content.ToString()); overviewPause.IsEnabled = !busy; }
+        var running = visualStateOverride == "stopped" ? false : backend.Running;
+        var publishing = visualStateOverride == "live" || visualStateOverride != "paused" && backend.PublicationEnabled;
+        if (overviewStart != null)
+        {
+            overviewStart.Content = busy && pendingAction == overviewStart ? "Working…" : running ? "Stop engine" : "Start engine";
+            AutomationProperties.SetName(overviewStart, running ? "Stop engine" : "Start engine");
+            overviewStart.Style = (Style)FindResource(running ? "QuietDangerButton" : "PrimaryButton");
+            overviewStart.IsEnabled = !busy && terminalProcess is not { HasExited: false };
+            overviewStart.ToolTip = backend.Running ? "Stop local monitoring and clear this engine’s presence" : "Start monitoring Codex sessions";
+        }
+        if (overviewPause != null)
+        {
+            overviewPause.Content = busy && pendingAction == overviewPause ? "Working…" : publishing ? "Pause" : "Resume";
+            AutomationProperties.SetName(overviewPause, publishing ? "Pause" : "Resume");
+            overviewPause.Style = (Style)FindResource(running ? "PrimaryButton" : typeof(Button));
+            overviewPause.IsEnabled = !busy && running && (!backend.Options.MonitorOnly || visualStateOverride is "live" or "paused");
+            overviewPause.ToolTip = !backend.Running ? "Start the engine first" : backend.Options.MonitorOnly ? "Publication is disabled by local-only monitoring" : "Pause or resume Discord publication while monitoring continues";
+        }
         if (overviewBackground != null) overviewBackground.IsEnabled = !busy && terminalProcess is not { HasExited: false };
     }
 
@@ -565,6 +571,7 @@ public partial class MainWindow : Window
     {
         Heading("Presence visibility", "Choose what appears in Discord. These controls do not hide local dashboard data.");
         if (draft == null) return;
+        AddEditorPreview();
         var master = Card("PUBLICATION");
         EditBoolean(master, draft, "presence_enabled", "Publish Discord presence");
         var privacy = draft["privacy"]!.AsObject();
@@ -577,7 +584,10 @@ public partial class MainWindow : Window
 
     private CheckBox EditBoolean(Panel panel, JsonObject parent, string key, string label)
     {
-        var checkbox = new CheckBox { Content = Text(label, 12), IsChecked = B(parent[key]) };
+        var copy = new StackPanel(); copy.Children.Add(Text(label, 13));
+        var description = SettingDescription(key);
+        if (description.Length > 0) { var help = Text(description, 12, Muted); help.Margin = new Thickness(0, 4, 0, 0); copy.Children.Add(help); }
+        var checkbox = new CheckBox { Content = copy, IsChecked = B(parent[key]) };
         AutomationProperties.SetName(checkbox, label);
         checkbox.Checked += (_, _) => { parent[key] = true; MarkDirty(); };
         checkbox.Unchecked += (_, _) => { parent[key] = false; MarkDirty(); };
@@ -587,11 +597,20 @@ public partial class MainWindow : Window
 
     private ComboBox EditChoice(Panel panel, JsonObject parent, string key, string label, string[] values)
     {
-        var holder = new StackPanel { Margin = new Thickness(0, 7, 0, 7) };
-        holder.Children.Add(Text(label, 11, Muted));
-        var combo = new ComboBox { ItemsSource = values.Select(value => new Choice(value, ChoiceLabel(value))).ToArray(), DisplayMemberPath = "Title", SelectedValuePath = "Key", SelectedValue = S(parent[key], values[0]), Margin = new Thickness(0, 6, 0, 0) };
+        var holder = new Grid { MinHeight = 48, Margin = new Thickness(0, 4, 0, 4) };
+        holder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(.43, GridUnitType.Star) });
+        holder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(.57, GridUnitType.Star) });
+        var title = Text(label, 13); title.Margin = new Thickness(0, 0, 16, 0); holder.Children.Add(title);
+        var combo = new ComboBox { ItemsSource = values.Select(value => new Choice(value, ChoiceLabel(value))).ToArray(), DisplayMemberPath = "Title", SelectedValuePath = "Key", SelectedValue = S(parent[key], values[0]), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(combo, 1);
         AutomationProperties.SetName(combo, label);
-        combo.SelectionChanged += (_, _) => { if (combo.SelectedValue is string value) { parent[key] = value; MarkDirty(); } };
+        if (key == "ColorMode" && (string)GetValue(Appearance.ThemeModeProperty) == "system") combo.SelectedValue = "system";
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedValue is not string value) return;
+            if (key == "ColorMode") SetPresentationTheme(value == "system" ? "system" : "inherit");
+            if (key != "ColorMode" || value != "system") { parent[key] = value; MarkDirty(); }
+        };
         holder.Children.Add(combo); panel.Children.Add(holder);
         return combo;
     }
@@ -613,7 +632,7 @@ public partial class MainWindow : Window
         "chatgpt" => "Rounded",
         "work" => "Work / project",
         "continuous" => "Continuous since app opens",
-        "neutral" => "Neutral · black and white",
+        "neutral" => "Graphite",
         "slate" => "Slate · cool blue",
         "forest" => "Forest · muted green",
         "dusk" => "Dusk · warm purple",
@@ -634,6 +653,7 @@ public partial class MainWindow : Window
     {
         Heading("Presence layout", "Choose the heading, labels and visible fields.");
         if (draft == null) return;
+        AddEditorPreview();
         var display = draft["display"]!.AsObject();
         var layout = display["presence_layout"]!.AsObject();
         var textLayout = Card("DISCORD TEXT", "Keep the app heading, or use activity/project for three separate rows. Discord controls wrapping.");
@@ -725,6 +745,7 @@ public partial class MainWindow : Window
             if (page == savingPage) { dirty = false; draft = null; draftBase = null; Navigate(page); }
         }
         UpdateDraftMarkers();
+        ShowToast("Saved");
         Footer.Text = savingPage + " saved." + (dirty || editors.Values.Any(editor => editor.Dirty) ? " Unsaved edits remain." : "");
     }
 
@@ -749,7 +770,7 @@ public partial class MainWindow : Window
         {
             var appearance = SettingsCard("Appearance", "APPEARANCE", "Preview changes here, then save to keep them.");
             var interfaceStyle = EditChoice(appearance, preferenceCopy, "InterfaceStyle", "Interface style", new[] { "minimal", "soft", "chatgpt", "paper", "studio" });
-            var colorMode = EditChoice(appearance, preferenceCopy, "ColorMode", "Color mode", new[] { "dark", "light" });
+            var colorMode = EditChoice(appearance, preferenceCopy, "ColorMode", "Color mode", new[] { "system", "dark", "light" });
             var colorTheme = EditChoice(appearance, preferenceCopy, "ColorTheme", "Color theme", new[] { "neutral", "slate", "forest", "dusk" });
             void PreviewAppearance() => Appearance.Apply(this, preferenceCopy.Deserialize<Preferences>()!);
             previewAppearance = PreviewAppearance;
@@ -859,14 +880,13 @@ public partial class MainWindow : Window
         var tools = Card("DIAGNOSTICS");
         var output = new TextBox { Text = string.Join(Environment.NewLine, logs), IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13, Height = 180, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         AutomationProperties.SetName(output, "Diagnostics output");
-        var actions = new WrapPanel();
         foreach (var command in new[] { "doctor", "status" })
         {
-            var button = AsyncButton(Label(command), () => RunDiagnostic(command, output)); button.Margin = new Thickness(0, 0, 8, 8); actions.Children.Add(button);
+            var button = AsyncButton(Label(command), () => RunDiagnostic(command, output));
+            tools.Children.Add(ToolRow(command == "doctor" ? "Check connection" : "Engine status", command == "doctor" ? "Check Discord, session folders and local requirements." : "Inspect the current engine and session discovery.", button));
         }
-        tools.Children.Add(actions);
-        var terminal = AsyncButton("Open original terminal", OpenTerminal); terminal.Margin = new Thickness(0, 0, 0, 10); tools.Children.Add(terminal);
-        var shortcut = ActionButton("Create desktop shortcut", () => { var path = DesktopShortcut.Create(root); Footer.Text = "Desktop shortcut created."; logs.Add(path); }); shortcut.Margin = new Thickness(0, 0, 0, 10); tools.Children.Add(shortcut);
+        var terminal = AsyncButton("Open original terminal", OpenTerminal); tools.Children.Add(ToolRow("Original terminal", "Open the engine’s terminal interface.", terminal));
+        var shortcut = ActionButton("Create desktop shortcut", () => { var path = DesktopShortcut.Create(root); Footer.Text = "Desktop shortcut created."; ShowToast("Shortcut created"); logs.Add(path); }); tools.Children.Add(ToolRow("Desktop shortcut", "Return to your dashboard with one click.", shortcut));
         diagnostics = output;
         tools.Children.Add(diagnostics);
         var advanced = Card("COMPLETE CONFIGURATION", "All engine fields are available here. External edits are detected before saving. Previous files are backed up under Data / Backups.");
@@ -1035,6 +1055,7 @@ public partial class MainWindow : Window
         refreshTimer.Stop();
         hostTimer.Stop();
         priorityTimer.Stop();
+        if (!testMode) await SaveWindowPresentation();
         tray.Dispose();
         Close();
         Application.Current.Shutdown();
@@ -1172,7 +1193,7 @@ public partial class MainWindow : Window
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Interface style").SelectedValue = "soft";
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Color mode").SelectedValue = "light";
         Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Color theme").SelectedValue = "forest";
-        Check(backend.Options.ColorTheme == "neutral" && ((SolidColorBrush)FindResource("Canvas")).Color.ToString() == "#FFF3F7F3", "Color themes preview immediately without saving preferences");
+        Check(backend.Options.ColorTheme == "neutral" && ((SolidColorBrush)FindResource("Canvas")).Color == ((SolidColorBrush)((ResourceDictionary)FindResource("Lightforest"))["Canvas"]).Color, "Color themes preview immediately without saving preferences");
         ShowSettingsSection("Activity");
         Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Give games and selected apps priority").IsChecked = true;
         Elements<CheckBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Detect running Steam games").IsChecked = false;
@@ -1231,7 +1252,7 @@ public partial class MainWindow : Window
         var themeDuringSave = Elements<ComboBox>(PageBody).Single(item => AutomationProperties.GetName(item) == "Color theme"); themeDuringSave.SelectedValue = "slate";
         var savingTheme = SaveDraft(); themeDuringSave.SelectedValue = "forest";
         await savingTheme;
-        Check(page == "Settings" && dirty && themeDuringSave.SelectedValue?.ToString() == "forest" && backend.Options.ColorTheme == "slate" && ((SolidColorBrush)FindResource("Canvas")).Color.ToString() == "#FFF3F7F3", "New appearance edits during a save remain unsaved and keep their live preview");
+        Check(page == "Settings" && dirty && themeDuringSave.SelectedValue?.ToString() == "forest" && backend.Options.ColorTheme == "slate" && ((SolidColorBrush)FindResource("Canvas")).Color == ((SolidColorBrush)((ResourceDictionary)FindResource("Lightforest"))["Canvas"]).Color, "New appearance edits during a save remain unsaved and keep their live preview");
         await SaveDraft();
         Check(PriorityMonitor.Match(new[] { "FortniteClient-Win64-Shipping" }, "", false) != null, "Known game processes receive priority");
         Check(PriorityMonitor.Match(new[] { "spotify", "Minecraft.Windows" }, @"C:\Apps\Spotify.EXE", false) == "spotify" && PriorityMonitor.Match(new[] { "Minecraft.Windows" }, "Minecraft.Windows", false) != null, "Custom executables match paths, casing and dotted process names");
@@ -1292,7 +1313,7 @@ public partial class MainWindow : Window
         await ApplyHostState(true); await ApplyHostState(false);
         Check(backend.Running, "Closing ChatGPT preserves an engine that was started manually");
         ShowDashboard();
-        Check(StatusPanel.Child is Grid status && status.Children.Contains(Footer) && Footer.FontSize >= 13, "Status text lives inside a readable dedicated panel");
+        Check(StatusPanel.Child is Grid status && status.Children.Contains(Footer) && Footer.FontSize >= 12 && StatusPanel.Margin == new Thickness(0), "Status text lives in the full-width sticky footer strip");
         Check(!Elements<TextBlock>(this).Any(text => text.Text == "/ desktop"), "The title bar has no redundant desktop suffix");
         var shortcutPath = DesktopShortcut.Create(root, Path.Combine(evidence, "Desktop"));
         dynamic shortcutShell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
@@ -1349,6 +1370,7 @@ public partial class MainWindow : Window
         await DiscordApplicationChecks(checks);
         await AuditChecks(checks, evidence);
         await QualityChecks(checks);
+        await DesignChecks(checks, evidence);
         dirty = false;
         await backend.Stop();
         Check(!backend.Running, "Quit command gracefully stops the owned engine");

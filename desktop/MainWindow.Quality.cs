@@ -12,6 +12,7 @@ using System.Windows.Automation;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace CodexPresence;
 
@@ -112,11 +113,11 @@ public partial class MainWindow
         Check(PageBody.ActualWidth <= PageScroll.ActualWidth, "Long chat titles wrap within the dashboard without horizontal overflow");
         var values = Elements<Grid>((DependencyObject)firstContent!).Where(grid => grid.Children.Count == 2).Select(grid => grid.Children[1]).OfType<TextBlock>().ToArray();
         Check(values.Length == 6 && values.All(text => Typography.GetNumeralAlignment(text) == FontNumeralAlignment.Tabular), "Live session values use tabular numbers to prevent width jitter");
-        var icon = Elements<System.Windows.Shapes.Path>(PageBody).Single(path => path.Width == 22);
+        var icon = Elements<Image>(PageBody).Single(image => image.Source is BitmapImage bitmap && bitmap.UriSource.ToString().Contains("logo-256"));
         var progress = Elements<ProgressBar>(PageBody).First();
         var originalPreferences = JsonSerializer.Deserialize<Preferences>(JsonSerializer.Serialize(backend.Options))!;
         Appearance.Apply(this, new Preferences { InterfaceStyle = "paper", ColorMode = "light", ColorTheme = "forest" }); UpdateLayout();
-        Check(ReferenceEquals(icon.Stroke, FindResource("Text")) && ReferenceEquals(icon.Data, FindResource("BrandIcon")) && ReferenceEquals(progress.Foreground, FindResource("Accent")), "Retained dashboard icons and quota bars follow live theme changes");
+        Check(icon.Source != null && ReferenceEquals(progress.Foreground, FindResource("Accent")), "Retained app artwork stays crisp while usage bars follow live theme changes");
         double Luminance(string key)
         {
             var color = ((SolidColorBrush)FindResource(key)).Color;

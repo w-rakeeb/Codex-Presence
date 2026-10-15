@@ -22,7 +22,9 @@ Get-ChildItem -LiteralPath (Join-Path $taskProject 'releases\windows') -File | C
 $taskIcon = Get-ChildItem -LiteralPath (Join-Path $taskProject '.build\target') -Filter 'codex-app.ico' -Recurse -File | Select-Object -First 1
 if ($null -eq $taskIcon) { throw 'Build the engine first to generate its application icon.' }
 Copy-Item -LiteralPath $taskIcon.FullName -Destination (Join-Path $taskProject 'desktop\app.ico')
-Copy-Item -LiteralPath $taskIcon.FullName -Destination (Join-Path $taskRuntime 'app.ico')
+$taskDesktopIcon = Join-Path $taskProject 'desktop\Assets\app.ico'
+Copy-Item -LiteralPath $taskDesktopIcon -Destination (Join-Path $taskRuntime 'app.ico')
+Copy-Item -LiteralPath (Join-Path $taskProject 'desktop\Assets') -Destination $taskOutput -Recurse -Force
 dotnet publish (Join-Path $taskProject 'desktop\CodexPresence.csproj') -c Release -o $taskOutput --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed.' }
 Copy-Item -LiteralPath (Join-Path $taskProject 'LICENSE') -Destination (Join-Path $taskOutput 'LICENSE.txt')

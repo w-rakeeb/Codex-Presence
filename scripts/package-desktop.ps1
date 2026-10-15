@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string] $AppRoot, [string] $Version = '1.9.1', [string] $OutputDirectory)
+param([Parameter(Mandatory)][string] $AppRoot, [string] $Version = '2.0.0', [string] $OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $taskProject = Split-Path -Parent $PSScriptRoot
 if (-not [IO.Path]::IsPathFullyQualified($AppRoot)) { throw 'AppRoot must be absolute.' }
@@ -14,6 +14,7 @@ foreach ($taskName in @('Codex Presence.exe', 'Guide.md', 'LICENSE.txt')) {
     Copy-Item -LiteralPath $taskFile -Destination $taskPackage
 }
 Copy-Item -LiteralPath (Join-Path $taskApp 'Runtime') -Destination (Join-Path $taskPackage 'Runtime') -Recurse
+Copy-Item -LiteralPath (Join-Path $taskProject 'desktop\Assets') -Destination $taskPackage -Recurse
 Copy-Item -LiteralPath (Join-Path $taskProject 'NOTICE.md') -Destination $taskPackage
 $taskPaths = Get-ChildItem -LiteralPath $taskPackage -File -Recurse | Sort-Object FullName
 $taskSums = foreach ($taskFile in $taskPaths) { (Get-FileHash -LiteralPath $taskFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $taskFile.FullName.Substring($taskPackage.Length + 1).Replace('\', '/') }

@@ -1,5 +1,16 @@
 # Desktop release notes
 
+## 2.0.0
+
+- Redesign the WPF shell with graphite layers, indigo actions, segmented navigation, a sticky footer and a pinned Layout preview.
+- Replace equal-weight engine buttons with a status card, one primary action and a background/exit overflow menu.
+- Add usage tiles, exact-value copy, context/cache meters, a cached-input breakdown and clearer settings/tool rows.
+- Consolidate palettes and control templates; add stronger input outlines, System appearance, high-contrast mapping and reduced motion.
+- Add app artwork at 16/20/24/32/48/256 sizes and monochrome live/paused/error tray variants for dark/light taskbars.
+- Remember geometry and last tab separately. Preserve settings formats, manual Save/Reload, drafts, engine behavior and exact Discord text.
+
+See `desktop-design.md` for component ownership, contrast adjustments, verification scope and preserved decisions.
+
 ## 1.9.1
 
 - Keep automatic startup and background monitoring, but hide Discord presence until a new Codex prompt or task starts after the companion opens. Restored chats, metadata updates and token refreshes cannot unlock it.
