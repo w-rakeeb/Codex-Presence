@@ -1,8 +1,10 @@
 # Codex Presence — A to Z
 
-## Desktop 2.0 interface
+## Desktop 2.0.2 interface
 
 Overview shows engine status, the exact saved Discord text and usage tiles. The primary action is Start engine, Pause or Resume; background and Exit are in the overflow menu. Layout keeps the saved preview pinned while controls scroll. Settings groups are Appearance, Behavior, Startup and Advanced.
+
+The native interface uses daisyUI-inspired component patterns: joined usage statistics, bordered tabs, grouped settings, quiet secondary actions and a sticky Save/Reload area. No browser runtime is required.
 
 Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
 

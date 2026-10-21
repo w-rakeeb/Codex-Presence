@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string] $AppRoot, [string] $Version = '2.0.1', [string] $OutputDirectory)
+param([Parameter(Mandatory)][string] $AppRoot, [string] $Version = '2.0.2', [string] $OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $taskProject = Split-Path -Parent $PSScriptRoot
 if (-not [IO.Path]::IsPathFullyQualified($AppRoot)) { throw 'AppRoot must be absolute.' }

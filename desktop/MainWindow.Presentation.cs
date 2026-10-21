@@ -184,7 +184,7 @@ public partial class MainWindow
 
     private TextBlock SectionLabel(string title)
     {
-        var label = Text(title.ToUpperInvariant(), 12, Muted);
+        var label = Text(title, 12, Muted);
         label.FontWeight = FontWeights.SemiBold;
         label.Margin = new Thickness(0, 12, 0, 12);
         return label;
@@ -192,19 +192,22 @@ public partial class MainWindow
 
     private void BuildEngineControlCard()
     {
-        var stack = new Grid(); stack.ColumnDefinitions.Add(new ColumnDefinition()); stack.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var stack = new Grid();
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) }); header.ColumnDefinitions.Add(new ColumnDefinition());
         var dot = new Ellipse { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) }; header.Children.Add(dot);
         var text = new StackPanel(); Grid.SetColumn(text, 1); header.Children.Add(text);
-        var headline = Text("", 14); headline.FontWeight = FontWeights.SemiBold; text.Children.Add(headline);
+        var headline = Text("", 18); headline.FontWeight = FontWeights.SemiBold; text.Children.Add(headline);
         var detail = Text("", 12, Muted); detail.Margin = new Thickness(0, 4, 0, 0); text.Children.Add(detail);
         stack.Children.Add(header);
-        var controls = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 0, 0, 0) }; Grid.SetColumn(controls, 1);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 16, 0, 0) }; Grid.SetRow(controls, 1);
         overviewPause = AsyncButton("Pause", TogglePresence);
         overviewStart = AsyncButton("Start engine", () => backend.Running ? StopEngine() : StartEngine());
         overviewBackground = ActionButton("⋯", () => { overviewBackground!.ContextMenu!.IsOpen = true; });
         overviewBackground.MinWidth = 36; overviewBackground.Padding = new Thickness(8, 0, 8, 0); overviewBackground.FontSize = 20;
+        overviewBackground.Style = (Style)FindResource("GhostButton");
         overviewBackground.ToolTip = "More actions · background and exit"; AutomationProperties.SetName(overviewBackground, "More actions");
         var menu = new ContextMenu { PlacementTarget = overviewBackground, Placement = PlacementMode.Bottom };
         menu.Items.Add(MenuAction("Run in background", "\uE8A7", RunInBackground));
@@ -234,7 +237,10 @@ public partial class MainWindow
     {
         var body = new StackPanel();
         var top = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
-        var badge = Text("Preview", 12, Muted); DockPanel.SetDock(badge, Dock.Right); top.Children.Add(badge); top.Children.Add(Text("Playing", 12, Muted)); body.Children.Add(top);
+        var badge = new Border { Child = Text("Preview", 12, Muted), Padding = new Thickness(8, 4, 8, 4) };
+        badge.SetResourceReference(Border.BackgroundProperty, "Control");
+        badge.SetResourceReference(Border.CornerRadiusProperty, "BadgeRadius");
+        DockPanel.SetDock(badge, Dock.Right); top.Children.Add(badge); top.Children.Add(Text("Playing", 12, Muted)); body.Children.Add(top);
         var row = new Grid(); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) }); row.ColumnDefinitions.Add(new ColumnDefinition());
         var tile = new Border { Width = 56, Height = 56, CornerRadius = new CornerRadius(12), VerticalAlignment = VerticalAlignment.Top, Child = new Image { Source = new BitmapImage(new Uri("pack://application:,,,/Assets/logo-256.png")) } };
         row.Children.Add(tile);
@@ -286,11 +292,13 @@ public partial class MainWindow
     private void BuildSessionUsage()
     {
         PageBody.Children.Add(SectionLabel("Session usage"));
-        var tiles = new UniformGrid { Columns = 3, Margin = new Thickness(0, 0, -12, 0) };
+        var tiles = new UniformGrid { Columns = 3 };
         tiles.Children.Add(StatTile("Tokens", s => CompactNumber(s?["metrics"]?["totals"]?["total_tokens"]), null, s => Count(s?["metrics"]?["totals"]?["total_tokens"])));
         tiles.Children.Add(StatTile("Cache hit", s => Number(s?["metrics"]?["totals"]?["cache_hit_ratio"]) is { } ratio ? (Math.Clamp(ratio, 0, 1) * 100).ToString("F1") + "%" : "—", s => Number(s?["metrics"]?["totals"]?["cache_hit_ratio"]) * 100));
         tiles.Children.Add(StatTile("Context used", s => Number(ActiveContext(s)) is { } used ? used.ToString("0.#") + "%" : "—", s => Number(ActiveContext(s)), warning: true));
-        PageBody.Children.Add(tiles);
+        var statistics = Surface(tiles); statistics.Padding = new Thickness(0);
+        ((Border)tiles.Children[tiles.Children.Count - 1]).BorderThickness = new Thickness(0);
+        PageBody.Children.Add(statistics);
         var usage = new StackPanel();
         LiveRow(usage, "Input / cached / output", s => CompactNumber(s?["metrics"]?["totals"]?["input_tokens"]) + " / " + CompactNumber(s?["metrics"]?["totals"]?["cached_input_tokens"]) + " / " + CompactNumber(s?["metrics"]?["totals"]?["output_tokens"]));
         usage.Children.Add(UsageStackedBar());
@@ -312,7 +320,9 @@ public partial class MainWindow
         }
         overviewUpdates.Add(snapshot => { var full = exact?.Invoke(snapshot) ?? value(snapshot); number.ToolTip = full; AutomationProperties.SetName(number, label + ", " + full); });
         var copy = new ContextMenu(); var item = new MenuItem { Header = "Copy full value" }; item.Click += (_, _) => { Clipboard.SetText(exact?.Invoke(displayedSnapshot) ?? value(displayedSnapshot)); ShowToast("Copied"); }; copy.Items.Add(item); number.ContextMenu = copy;
-        var card = Surface(panel); card.Margin = new Thickness(0, 0, 12, 12); return card;
+        var card = new Border { Child = panel, Padding = new Thickness(16), BorderThickness = new Thickness(0, 0, 1, 0) };
+        card.SetResourceReference(Border.BorderBrushProperty, "Line");
+        return card;
     }
 
     private StackPanel UsageStackedBar()

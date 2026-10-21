@@ -1,5 +1,13 @@
 # Desktop release notes
 
+## 2.0.2
+
+- Apply the daisyUI skill's card, fieldset, bordered-tab, button, toggle and stats patterns through native WPF components. No web runtime or UI dependency is added.
+- Give engine status a clearer headline and a separate action row that fits narrow windows.
+- Join usage statistics into one panel with consistent alignment, inset padding and dividers.
+- Refine secondary actions, preview badges, card spacing, form labels and the sticky Save/Reload area across all five tabs.
+- Preserve every existing setting, manual save behavior, startup gate, original attribution and exact outgoing Discord payload.
+
 ## 2.0.1
 
 - Use the Windows highlight text brush for selected tabs and dropdown items in custom high-contrast themes. The 2.0 redesign and engine/settings contracts remain unchanged.

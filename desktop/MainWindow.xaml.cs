@@ -398,7 +398,7 @@ public partial class MainWindow : Window
         heading.SetResourceReference(TextBlock.FontFamilyProperty, "HeadingFont");
         heading.SetResourceReference(TextBlock.FontWeightProperty, "HeadingWeight");
         heading.SetResourceReference(TextBlock.FontSizeProperty, "CardTitleSize");
-        heading.Margin = new Thickness(0, 0, 0, 12);
+        heading.Margin = new Thickness(0, 0, 0, 16);
         inner.Children.Add(heading);
         if (subtitle != null) { var description = Text(subtitle, 11, Muted); description.Margin = new Thickness(0, 0, 0, 12); inner.Children.Add(description); }
         var border = Surface(inner);
@@ -410,7 +410,7 @@ public partial class MainWindow : Window
     {
         var header = Text(title); header.SetResourceReference(TextBlock.FontSizeProperty, "HeadingSize"); header.SetResourceReference(TextBlock.FontFamilyProperty, "HeadingFont"); header.SetResourceReference(TextBlock.FontWeightProperty, "HeadingWeight");
         PageBody.Children.Add(header);
-        var detail = Text(description, 12, Muted); detail.Margin = new Thickness(0, 6, 0, 18);
+        var detail = Text(description, 13, Muted); detail.Margin = new Thickness(0, 8, 0, 24);
         PageBody.Children.Add(detail);
     }
 
@@ -641,8 +641,8 @@ public partial class MainWindow : Window
 
     private TextBox EditText(Panel panel, JsonObject parent, string key, string label, bool optional = false, int maximum = 0)
     {
-        var holder = new StackPanel { Margin = new Thickness(0, 7, 0, 7) }; holder.Children.Add(Text(label, 11, Muted));
-        var box = new TextBox { Text = S(parent[key], ""), ToolTip = S(parent[key], ""), MaxLength = maximum, Margin = new Thickness(0, 6, 0, 0) };
+        var holder = new StackPanel { Margin = new Thickness(0, 8, 0, 8) }; holder.Children.Add(Text(label, 12, Muted));
+        var box = new TextBox { Text = S(parent[key], ""), ToolTip = S(parent[key], ""), MaxLength = maximum, Margin = new Thickness(0, 8, 0, 0) };
         AutomationProperties.SetName(box, label);
         box.TextChanged += (_, _) => { parent[key] = optional && string.IsNullOrWhiteSpace(box.Text) ? null : JsonValue.Create(box.Text); MarkDirty(); };
         holder.Children.Add(box); panel.Children.Add(holder);

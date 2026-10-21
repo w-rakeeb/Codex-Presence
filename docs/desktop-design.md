@@ -43,3 +43,58 @@ No additional approval is needed for this visual update. Autosave, rewording Dis
 - Keyboard shortcuts, arrow navigation, visible focus and UIA names are verified; native screen-reader certification remains outstanding.
 - Save/Reload, privacy/layout drafts, engine binary and outgoing Discord strings are preserved.
 - 100/125/150/200% WPF render-scale images and high-contrast resources are checked. Physical display/text scaling and mixed-monitor DPI remain explicitly unverified.
+
+# Desktop component system
+
+The desktop app remains .NET 8 WPF. daisyUI 5 is a CSS library, so its classes cannot style native WPF controls. This redesign adapts the daisyUI skill's component structure and semantic colors to existing WPF templates without adding a browser runtime or changing the presence engine.
+
+## Component selection
+
+| Purpose | daisyUI pattern | Native implementation |
+| --- | --- | --- |
+| Main navigation | `tabs-border`, `tab-active` | Shared `TabButton`, keyboard navigation, active underline |
+| Related settings | `fieldset`, `fieldset-legend`, `label` | Shared settings cards, heading, description, existing controls |
+| Engine and tools | `card`, `card-body`, `card-actions` | `Surface`, `BuildEngineControlCard`, `ToolRow` |
+| Session numbers | `stats`, `stat-title`, `stat-value` | Joined `StatTile` group with inset padding and hairline separators |
+| Main action | `btn-primary` | `PrimaryButton`, one state-dependent engine action |
+| Secondary actions | `btn`, `btn-ghost` | Native default, `GhostButton`, `QuietDangerButton` |
+| Boolean setting | `toggle`, `toggle-primary` | Existing accessible CheckBox template and retained draft bindings |
+| Preview annotation | `badge` | Compact neutral rounded badge, separate from outgoing text |
+
+Cards suit independent engine/preview content; fieldsets suit related settings. Session values use a single joined stats group rather than repeating three cards. Bordered tabs retain the existing five destinations without adding a sidebar to a compact window.
+
+## Semantic theme mapping
+
+All palette values remain in `desktop/Theme.xaml`, including the existing Graphite, Slate, Forest and Dusk variants. `Appearance.cs` selects light/dark/system and Windows high-contrast resources.
+
+| daisyUI role | WPF resource |
+| --- | --- |
+| base-100 | Surface |
+| base-200 | Canvas |
+| base-300 | Control |
+| base-content | Text, Secondary, Muted |
+| primary / primary-content | Accent / OnAccent |
+| neutral | Control |
+| success / warning / error | Success / Warning / Danger |
+| border, field radius, box radius | Line, InputRadius, CardRadius |
+
+Use color for meaning, never to decorate entire settings sections. Numeric values remain tabular. Exact engine preview strings and outgoing Discord fields are unmodified. Existing manual Save/Reload, unsaved draft protection, config schema, background startup gate and tray behavior are retained.
+
+## Component tree
+
+```text
+App shell
+  Title bar
+  Bordered tab navigation
+  Pinned layout preview
+  Scrollable page
+    Overview: engine card, Discord preview, joined stats, usage details
+    Privacy: preview, publication fieldset, visible fields
+    Layout: text layout, labels, field ordering
+    Settings: Appearance / Behavior / Startup / Advanced fieldsets
+    Tools: diagnostic action rows, complete configuration, reference
+  Save/Reload draft actions
+  Status strip
+```
+
+The verification suite captures all five tabs, engine states, light/dark palettes, high contrast, small/large windows and 100/125/150/200 percent WPF render scales. Raster scale tests do not certify physical display scaling or screen reader behavior.
