@@ -33,6 +33,8 @@ pub struct DiscordPresence {
     client: Option<DiscordIpcClient>,
     last_status: String,
     last_sent: Option<PresencePayload>,
+    last_manual_payload: Option<String>,
+    connected_epoch: Option<i64>,
     last_publish_at: Option<Instant>,
     known_asset_keys: Option<HashSet<String>>,
     last_asset_refresh_at: Option<Instant>,
@@ -185,6 +187,8 @@ impl DiscordPresence {
             client: None,
             last_status,
             last_sent: None,
+            last_manual_payload: None,
+            connected_epoch: None,
             last_publish_at: None,
             known_asset_keys: None,
             last_asset_refresh_at: None,
@@ -273,6 +277,10 @@ impl DiscordPresence {
         config: &PresenceConfig,
         fallback_surface: PresenceSurface,
     ) -> Result<()> {
+        if self.last_manual_payload.take().is_some() {
+            self.last_sent = None;
+            self.last_publish_at = None;
+        }
         self.surface = detect_surface(active_session, fallback_surface, self.last_known_surface);
         self.last_known_surface = self.surface;
         let timer_epoch = self.timer_epoch_at(active_session, config, Utc::now().timestamp());
@@ -436,6 +444,72 @@ impl DiscordPresence {
             }
         }
 
+        Ok(())
+    }
+
+    pub(crate) fn manual_timestamps(
+        &self,
+        session: &crate::manual::ManualSession,
+    ) -> (Option<i64>, Option<i64>) {
+        session.timestamps(self.connected_epoch, Utc::now().timestamp())
+    }
+
+    pub(crate) fn update_manual(
+        &mut self,
+        session: &crate::manual::ManualSession,
+        config: &PresenceConfig,
+        enabled: bool,
+    ) -> Result<()> {
+        self.surface = PresenceSurface::Desktop;
+        if !self.apply_presence_enabled(enabled)? {
+            return Ok(());
+        }
+        self.switch_client_if_needed(config.effective_client_id_for_surface(self.surface));
+        if self.ensure_connected().is_err() || self.client.is_none() {
+            return Ok(());
+        }
+        self.refresh_asset_keys_if_needed();
+        let presentation = manual_presence_presentation(session, config);
+        let (start, end) = self.manual_timestamps(session);
+        let fingerprint = serde_json::to_string(&(
+            start,
+            end,
+            &presentation.app_name,
+            &presentation.details,
+            &presentation.state,
+            &presentation.large_image_key,
+        ))?;
+        let heartbeat = self
+            .last_heartbeat_at
+            .is_none_or(|value| value.elapsed() >= DISCORD_HEARTBEAT_INTERVAL);
+        if self.last_manual_payload.as_ref() == Some(&fingerprint) && !heartbeat {
+            return Ok(());
+        }
+        if self
+            .last_publish_at
+            .is_some_and(|value| value.elapsed() < DISCORD_MIN_PUBLISH_INTERVAL)
+        {
+            return Ok(());
+        }
+        let image = resolve_image_key(
+            &presentation.large_image_key,
+            self.known_asset_keys.as_ref(),
+        );
+        let activity = build_manual_activity(&presentation, start, end, image.as_deref());
+        if let Err(error) = self
+            .client
+            .as_mut()
+            .ok_or_else(|| anyhow!("Discord connection is missing"))?
+            .set_activity(activity)
+        {
+            self.handle_ipc_error(&error.to_string());
+            return Err(anyhow!(error.to_string()));
+        }
+        self.last_manual_payload = Some(fingerprint);
+        self.last_sent = None;
+        self.last_publish_at = Some(Instant::now());
+        self.last_heartbeat_at = Some(Instant::now());
+        self.last_status = "Connected · Manual presence".into();
         Ok(())
     }
 
@@ -612,6 +686,7 @@ impl DiscordPresence {
             let _ = client.close();
         }
         self.client = None;
+        self.connected_epoch = None;
         self.last_sent = None;
         self.last_publish_at = None;
         self.last_heartbeat_at = None;
@@ -629,6 +704,7 @@ impl DiscordPresence {
             let _ = client.close();
         }
         self.client = None;
+        self.connected_epoch = None;
         self.last_sent = None;
         self.last_publish_at = None;
         self.last_heartbeat_at = None;
@@ -715,6 +791,7 @@ impl DiscordPresence {
         {
             Ok(()) => {
                 self.client = Some(client);
+                self.connected_epoch = Some(Utc::now().timestamp());
                 self.last_sent = None;
                 self.last_heartbeat_at = None;
                 self.reconnect_backoff = RECONNECT_MIN_BACKOFF;
@@ -770,6 +847,7 @@ impl DiscordPresence {
 
     fn handle_ipc_error(&mut self, message: &str) {
         self.client = None;
+        self.connected_epoch = None;
         self.increase_backoff();
         self.last_status = format!("Discord error: {}", compact_error(message));
     }
@@ -792,6 +870,7 @@ impl DiscordPresence {
             let _ = client.close();
         }
         self.client = None;
+        self.connected_epoch = None;
         self.client_id = next_client_id;
         self.last_sent = None;
         self.last_publish_at = None;
@@ -949,6 +1028,47 @@ pub fn idle_presence_presentation(
         small_image_key: None,
         small_text: None,
     }
+}
+
+pub(crate) fn manual_presence_presentation(
+    session: &crate::manual::ManualSession,
+    config: &PresenceConfig,
+) -> PresencePresentation {
+    let mut presentation = idle_presence_presentation(PresenceSurface::Desktop, config);
+    if !config.privacy.enabled {
+        presentation.details = session.profile.details.clone();
+        presentation.state = session.profile.state.clone();
+    }
+    presentation
+}
+
+fn build_manual_activity<'a>(
+    presentation: &'a PresencePresentation,
+    start: Option<i64>,
+    end: Option<i64>,
+    image: Option<&'a str>,
+) -> Activity<'a> {
+    let mut activity = build_activity(ActivitySpec {
+        name: &presentation.app_name,
+        details: &presentation.details,
+        state: &presentation.state,
+        start_epoch: None,
+        large_image_key: image,
+        large_text: Some(&presentation.large_text),
+        small_image_key: None,
+        small_text: None,
+    });
+    if start.is_some() || end.is_some() {
+        let mut timestamps = Timestamps::new();
+        if let Some(value) = start {
+            timestamps = timestamps.start(value);
+        }
+        if let Some(value) = end {
+            timestamps = timestamps.end(value);
+        }
+        activity = activity.timestamps(timestamps);
+    }
+    activity
 }
 
 fn status_for_client_id(surface: PresenceSurface, client_id: Option<&str>) -> String {
@@ -3278,5 +3398,70 @@ mod tests {
         assert_eq!(presence.known_asset_keys, Some(keys));
         assert!(presence.asset_fetch.is_none());
         assert!(presence.last_heartbeat_at.is_none());
+    }
+}
+
+#[cfg(test)]
+mod manual_payload_tests {
+    use super::*;
+    use crate::manual::{ManualProfile, ManualSession};
+
+    #[test]
+    fn manual_payload_has_separate_text_and_start_end_timestamps() {
+        let config = PresenceConfig::default();
+        let session = ManualSession {
+            profile: ManualProfile {
+                details: "Thinking · My project".into(),
+                state: "Model · High".into(),
+                timestamp_mode: "custom".into(),
+                start_epoch: Some(100),
+                end_epoch: Some(300),
+            },
+            started_at: 100,
+            updated_at: 150,
+        };
+        let preview = manual_presence_presentation(&session, &config);
+        let default = idle_presence_presentation(PresenceSurface::Desktop, &config);
+        assert_eq!(preview.app_name, default.app_name);
+        assert_eq!(preview.large_image_key, default.large_image_key);
+        let value = serde_json::to_value(build_manual_activity(
+            &preview,
+            Some(100),
+            Some(300),
+            Some(&preview.large_image_key),
+        ))
+        .unwrap();
+        assert_eq!(value["details"], "Thinking · My project");
+        assert_eq!(value["state"], "Model · High");
+        assert_eq!(value["timestamps"]["start"], 100);
+        assert_eq!(value["timestamps"]["end"], 300);
+    }
+
+    #[test]
+    fn privacy_overrides_manual_text_and_pause_never_connects() {
+        let mut config = PresenceConfig::default();
+        config.privacy.enabled = true;
+        let session = ManualSession {
+            profile: ManualProfile {
+                details: "Sensitive project".into(),
+                state: "Private text".into(),
+                timestamp_mode: "session".into(),
+                start_epoch: None,
+                end_epoch: None,
+            },
+            started_at: 100,
+            updated_at: 150,
+        };
+        let preview = manual_presence_presentation(&session, &config);
+        let expected = idle_presence_presentation(PresenceSurface::Desktop, &config);
+        assert_eq!(preview.details, expected.details);
+        assert_eq!(preview.state, expected.state);
+        let mut presence = DiscordPresence::new(config.effective_client_id());
+        presence.suppress_ipc_connect = true;
+        presence.update_manual(&session, &config, false).unwrap();
+        assert_eq!(presence.connect_attempts, 0);
+        assert_eq!(presence.clear_attempts, 1);
+        presence.update_manual(&session, &config, false).unwrap();
+        assert_eq!(presence.clear_attempts, 1);
     }
 }

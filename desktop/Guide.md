@@ -1,3 +1,9 @@
+# Codex Presence 3.1
+
+The sidebar includes **Manual presence** for a custom activity and timeline. Enter an activity/project line and an optional second line. Choose connection time, last manual update, manual-session start, local clock, or custom timestamps. Custom times use your PC's local time; an optional future End creates a countdown. Save profile keeps these fields without publishing. Start or apply explicitly enables manual mode; Use automatic presence restores real session text. Pause, privacy mode and app priority still apply. Manual mode never resumes automatically on a new engine/app start. Manual profiles live separately in Data/manual-presence.json.
+
+The overflow menu now opens above the page and stays within the window. Sidebar taglines have been removed. Content stretches with the window, resize edges remain native, and background layout/position writes pause during interactive resizing.
+
 # Codex Presence — A to Z
 
 ## Desktop 3.0 interface

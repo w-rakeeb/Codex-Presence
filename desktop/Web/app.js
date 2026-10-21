@@ -1,4 +1,5 @@
 const icons = {
+  Manual: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   Overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="11" width="7" height="10" rx="1"/>',
   Privacy: '<path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/>',
   Layout: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M10 9v11"/>',
@@ -25,13 +26,14 @@ const number = value => typeof value === 'number' && Number.isFinite(value) ? va
 const compact = value => number(value) === null ? '—' : new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 const percent = value => number(value) === null ? '—' : `${Math.max(0, Math.min(100, value)).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
 const post = (type, values = {}) => window.chrome?.webview?.postMessage({ type, ...values });
-const pages = ['Overview', 'Privacy', 'Layout', 'Settings', 'Tools'];
+const pages = ['Overview', 'Privacy', 'Layout', 'Settings', 'Tools', 'Manual'];
 const descriptions = {
   Overview: 'Your Codex session, connected to Discord.',
   Privacy: 'Choose what people see. Keep the rest to yourself.',
   Layout: 'Make room for the details that matter.',
   Settings: 'Make Presence work the way you do.',
-  Tools: 'Check your connection and keep things running.'
+  Tools: 'Check your connection and keep things running.',
+  Manual: 'Set your own activity and timeline.'
 };
 let current = null;
 let shape = '';
@@ -60,9 +62,18 @@ function preview(state, editor = false) {
   const idle = !data || !state.previewVisible;
   return `<section class="card card-border bg-base-100"><div class="card-body">
     <div class="flex items-center justify-between gap-3"><h2 class="card-title">Discord preview</h2><span class="badge badge-sm badge-ghost">${editor ? 'Saved output' : 'Live preview'}</span></div>
-    <div class="preview"><div class="text-xs muted mb-4">Playing</div>${idle ? '<div class="preview-empty"><p class="font-medium">Nothing to show yet</p><p class="text-xs muted mt-2">Send a new Codex prompt to get started.</p></div>' : `<div class="flex items-start gap-3"><img src="logo.png" class="preview-icon" alt="Codex Presence"><div class="preview-lines secondary min-w-0"><div class="preview-title" data-preview="app_name">${escape(data.app_name)}</div><div data-preview="details">${escape(data.details)}</div><div data-preview="state">${escape(data.state)}</div></div></div>`}</div>
+    ${state.snapshot?.manual_mode ? '<span class="badge badge-ghost badge-sm">Manual presence</span>' : ''}
+    <div class="preview"><div class="text-xs muted mb-4">Playing</div>${idle ? '<div class="preview-empty"><p class="font-medium">Nothing to show yet</p><p class="text-xs muted mt-2">Send a new Codex prompt to get started.</p></div>' : `<div class="flex items-start gap-3"><img src="logo.png" class="preview-icon" alt="Codex Presence"><div class="preview-lines secondary min-w-0"><div class="preview-title" data-preview="app_name">${escape(data.app_name)}</div><div data-preview="details">${escape(data.details)}</div><div data-preview="state">${escape(data.state)}</div>${state.snapshot?.manual_mode ? `<div data-manual-timer class="text-xs mt-2">${manualTime(state.snapshot)}</div>` : ''}</div></div>`}</div>
     <p class="text-xs muted leading-relaxed">${editor ? 'This is your saved Discord text. Save your changes to update it.' : 'Text comes directly from the presence engine. Discord controls line wrapping.'}</p>
   </div></section>`;
+}
+
+function manualTime(snapshot) {
+  const now = Math.floor(Date.now() / 1000), start = snapshot?.manual_start_epoch, end = snapshot?.manual_end_epoch;
+  if (!start) return 'Timer starts when Discord connects';
+  const seconds = Math.max(0, end ? end - now : now - start);
+  const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds / 60) % 60, remainder = seconds % 60;
+  return `${hours ? `${hours}:` : ''}${hours ? String(minutes).padStart(2, '0') : minutes}:${String(remainder).padStart(2, '0')} ${end ? 'remaining' : 'elapsed'}`;
 }
 
 function engine(state) {
@@ -73,7 +84,7 @@ function engine(state) {
     <div class="flex items-center justify-between"><div class="engine-icon">${icon('activity')}</div><span class="badge badge-sm badge-ghost"><span class="status status-xs ${toneClass(mode.tone)}"></span>${escape(mode.tone === 'Success' ? 'Connected' : state.running ? 'Monitoring' : 'Stopped')}</span></div>
     <div><h2>${escape(mode.headline)}</h2><p class="secondary text-sm mt-2 leading-relaxed">${escape(mode.detail)}</p></div>
     ${active ? `<div class="border-l-2 border-base-content/15 pl-3 mt-1"><p class="text-xs muted mb-1">Current session</p><p class="text-sm font-medium truncate" title="${escape(active.project_name)}">${escape(active.project_name || 'Untitled session')}</p><p class="text-xs muted mt-1">${escape(active.model)} · ${escape(active.reasoning_effort || 'Default effort')}</p></div>` : ''}
-    <div class="card-actions items-center mt-auto pt-3"><button class="btn btn-primary" data-command="engine-primary" title="${state.monitorOnly && state.running ? 'Publication is disabled in local-only monitoring' : primary}" ${state.busy || state.monitorOnly && state.running ? 'disabled' : ''}>${icon(!state.running || !state.publicationEnabled ? 'play' : 'pause')}${primary}</button>${state.running ? '<button class="btn btn-ghost" data-command="stop">Stop</button>' : ''}<details class="dropdown dropdown-end ml-auto"><summary class="btn btn-ghost btn-square" aria-label="More engine actions">${icon('more')}</summary><ul class="dropdown-content menu bg-base-100 border border-base-content/10 rounded-box z-20 w-52 p-2 shadow-xl"><li><button data-command="background">${icon('background')}Run in background</button></li><li><button data-command="exit" class="text-error">${icon('close')}Exit Presence</button></li></ul></details></div>
+    <div class="card-actions items-center mt-auto pt-3"><button class="btn btn-primary" data-command="engine-primary" title="${state.monitorOnly && state.running ? 'Publication is disabled in local-only monitoring' : primary}" ${state.busy || state.monitorOnly && state.running ? 'disabled' : ''}>${icon(!state.running || !state.publicationEnabled ? 'play' : 'pause')}${primary}</button>${state.running ? '<button class="btn btn-ghost" data-command="stop">Stop</button>' : ''}<button id="engine-more" class="btn btn-ghost btn-square ml-auto" popovertarget="engine-actions" aria-label="More engine actions" title="More engine actions">${icon('more')}</button></div>
   </div></section>`;
 }
 
@@ -113,7 +124,7 @@ function renderNode(node) {
     case 'stack': return `<div class="native-stack" ${id}>${children()}</div>`;
     case 'toggle': return `<label class="toggle-row" ${id}><div class="native-stack">${node.children?.length ? children() : `<div class="native-text">${label}</div>`}</div><span class="flex items-center gap-3 shrink-0"><span class="text-xs muted toggle-state">${node.value ? 'On' : 'Off'}</span><input type="checkbox" class="toggle toggle-sm" data-control="${node.id}" aria-label="${label}" ${node.value ? 'checked' : ''} ${disabled}></span></label>`;
     case 'select': return `<div class="native-control" ${id}><select class="select select-sm" data-control="${node.id}" aria-label="${label}" ${disabled}>${node.options.map((item, index) => `<option value="${index}" ${index === node.value ? 'selected' : ''}>${escape(item)}</option>`).join('')}</select><div class="text-error text-xs mt-1" data-feedback="${node.id}" hidden></div></div>`;
-    case 'input': return `<div class="native-control" ${id}>${node.multiline ? `<textarea class="textarea" data-control="${node.id}" aria-label="${label}" ${node.readOnly ? 'readonly' : ''} ${disabled}>${escape(node.value)}</textarea>` : `<input class="input input-sm" data-control="${node.id}" aria-label="${label}" value="${escape(node.value)}" ${node.maximum ? `maxlength="${node.maximum}"` : ''} ${node.readOnly ? 'readonly' : ''} ${disabled}>`}<div class="text-error text-xs mt-1" data-feedback="${node.id}" hidden></div></div>`;
+    case 'input': return `<div class="native-control" ${id}>${node.multiline ? `<textarea class="textarea" data-control="${node.id}" aria-label="${label}" ${node.readOnly ? 'readonly' : ''} ${disabled}>${escape(node.value)}</textarea>` : `<input class="input input-sm" data-control="${node.id}" aria-label="${label}" type="${label.includes('local date and time') ? 'datetime-local' : 'text'}" value="${escape(node.value)}" ${node.maximum ? `maxlength="${node.maximum}"` : ''} ${node.readOnly ? 'readonly' : ''} ${disabled}>`}<div class="text-error text-xs mt-1" data-feedback="${node.id}" hidden></div></div>`;
     case 'button': return `<button class="btn ${node.primary ? 'btn-primary' : 'btn-sm'}" data-action="${node.id}" ${id} aria-label="${label}" title="${escape(node.tip || node.label)}" ${disabled}>${escape(node.text || node.label)}</button>`;
     case 'collapse': return `<details class="collapse collapse-arrow native-collapse" ${id} ${node.expanded ? 'open' : ''}><summary class="collapse-title" data-expand="${node.id}">${label}</summary><div class="collapse-content">${children()}</div></details>`;
     case 'progress': return `<progress class="progress" ${id} value="${node.value}" max="${node.maximum || 100}" aria-label="${label}"></progress>`;
@@ -124,8 +135,8 @@ function renderNode(node) {
 function editor(state) {
   const sections = [['Appearance', 'Appearance'], ['Activity', 'Behavior'], ['Background', 'Startup'], ['Advanced', 'Advanced']];
   const tabs = state.page === 'Settings' ? `<div class="settings-sections" role="group" aria-label="Settings sections">${sections.map(([key, name]) => `<button class="btn btn-sm ${state.section === key ? 'btn-active' : 'btn-ghost'}" data-section="${key}">${icon(key === 'Appearance' ? 'Settings' : key === 'Activity' ? 'activity' : key === 'Background' ? 'background' : 'Tools')}${name}</button>`).join('')}</div>` : '';
-  const rail = ['Privacy', 'Layout'].includes(state.page) ? `<aside class="preview-rail">${preview(state, true)}<section class="card card-border bg-base-100"><div class="card-body"><h2 class="card-title">Your settings stay local</h2><p class="secondary text-sm leading-relaxed">Only enabled presence fields are shared with Discord. Your session files stay on this PC.</p><button class="btn btn-ghost btn-sm justify-between" data-page="${state.page === 'Privacy' ? 'Layout' : 'Privacy'}">${state.page === 'Privacy' ? 'Arrange your presence' : 'Choose visible fields'}${icon('arrow')}</button></div></section></aside>` : '';
-  return `${tabs}<div class="editor-layout"><div id="native-content">${state.nodes.map(renderNode).join('')}<p id="search-empty" class="muted p-8 text-center" hidden>No matching settings in this section.</p></div>${rail}</div>`;
+  const rail = ['Privacy', 'Layout', 'Manual'].includes(state.page) ? `<aside class="preview-rail">${preview(state, state.page !== 'Manual')}<section class="card card-border bg-base-100"><div class="card-body"><h2 class="card-title">Your settings stay local</h2><p class="secondary text-sm leading-relaxed">Only enabled presence fields are shared with Discord. Your session files stay on this PC.</p><button class="btn btn-ghost btn-sm justify-between" data-page="${state.page === 'Privacy' ? 'Layout' : 'Privacy'}">${state.page === 'Privacy' ? 'Arrange your presence' : 'Choose visible fields'}${icon('arrow')}</button></div></section></aside>` : '';
+  return `${tabs}<div class="editor-layout ${state.page === 'Manual' ? 'manual-editor' : ''}"><div id="native-content">${state.nodes.map(renderNode).join('')}<p id="search-empty" class="muted p-8 text-center" hidden>No matching settings in this section.</p></div>${rail}</div>`;
 }
 
 function toneClass(tone) { return ({ Success: 'status-success', Warning: 'status-warning', Danger: 'status-error', Accent: 'status-info' })[tone] || 'status-neutral'; }
@@ -135,7 +146,7 @@ function updateDashboard(state) {
   const snapshot = state.snapshot || {};
   const active = snapshot.sessions?.find(item => item.session_id === snapshot.active_session_id) || snapshot.sessions?.[0];
   const nextEngine = JSON.stringify([state.visual, state.running, state.publicationEnabled, state.busy, snapshot.preview, state.previewVisible, active?.project_name, active?.model, active?.reasoning_effort]);
-  if (nextEngine !== engineShape && !document.activeElement?.closest('#engine-region details[open]')) {
+  if (nextEngine !== engineShape && !$('#engine-actions').matches(':popover-open')) {
     $('#engine-region').innerHTML = engine(state) + preview(state);
     engineShape = nextEngine;
   }
@@ -179,6 +190,7 @@ function applySearch() {
 }
 
 window.receive = state => {
+  if (state.type === 'resizing') { document.documentElement.toggleAttribute('data-resizing', state.active); return; }
   current = state;
   document.documentElement.dataset.theme = state.light ? 'nord' : 'dim';
   document.documentElement.dataset.style = state.style || 'minimal';
@@ -190,13 +202,14 @@ window.receive = state => {
   if (nextNavigation !== navigationShape) {
     const focused = !!document.activeElement?.closest('#navigation');
     $('#navigation').innerHTML = pages.map(name => `<li><button class="${state.page === name ? 'menu-active' : ''}" aria-label="${name}${state.dirtyTabs.includes(name) ? ', unsaved changes' : ''}" aria-current="${state.page === name ? 'page' : 'false'}" title="${name}" data-page="${name}">${icon(name)}<span class="nav-copy">${name}</span>${state.dirtyTabs.includes(name) ? '<span class="status status-xs ml-auto" aria-hidden="true"></span>' : ''}</button></li>`).join('');
+    if ($('#engine-actions').matches(':popover-open')) $('#engine-actions').hidePopover();
     if (focused) document.querySelector(`#navigation [data-page=${state.page}]`)?.focus();
     navigationShape = nextNavigation;
   }
   $('#sidebar-status').className = `status status-sm ${toneClass(state.visual.tone)}`;
   $('#sidebar-state').textContent = state.visual.headline;
   if (nextShape !== shape) {
-    const heading = `<header class="page-heading"><div><h1>${state.page === 'Overview' ? 'Your workspace' : state.page}</h1><p class="secondary text-sm">${descriptions[state.page]}</p></div>${state.page !== 'Overview' ? `<label class="input input-sm settings-search bg-base-100 border-base-content/15">${icon('search')}<input id="setting-search" type="search" placeholder="Find in this section" aria-label="Find settings" value="${escape(search)}"></label>` : '<span class="badge badge-ghost badge-sm">Desktop companion</span>'}</header>`;
+    const heading = `<header class="page-heading"><div><h1>${state.page === 'Overview' ? 'Your workspace' : state.page === 'Manual' ? 'Manual presence' : state.page}</h1><p class="secondary text-sm">${descriptions[state.page]}</p></div>${state.page !== 'Overview' ? `<label class="input input-sm settings-search bg-base-100 border-base-content/15">${icon('search')}<input id="setting-search" type="search" placeholder="Find in this section" aria-label="Find settings" value="${escape(search)}"></label>` : '<span class="badge badge-ghost badge-sm">Desktop companion</span>'}</header>`;
     const oldScroll = $('#scroll').scrollTop;
     $('#page').innerHTML = heading + (state.page === 'Overview' ? dashboard(state) : editor(state));
     $('#scroll').scrollTop = changingPage ? scrollPositions.get(state.page) || 0 : oldScroll;
@@ -204,15 +217,16 @@ window.receive = state => {
     applySearch();
   }
   patchNodes(state.nodes);
+  document.querySelectorAll('[data-manual-timer]').forEach(node => { node.textContent = manualTime(state.snapshot); });
   if (state.page === 'Overview') updateDashboard(state);
-  if (['Privacy', 'Layout'].includes(state.page)) {
-    const nextRail = JSON.stringify([state.snapshot?.preview, state.previewVisible]);
-    if (nextRail !== railShape) { const rail = document.querySelector('.preview-rail > .card'); if (rail) { const template = document.createElement('template'); template.innerHTML = preview(state, true); rail.replaceWith(template.content.firstElementChild); } railShape = nextRail; }
+  if (['Privacy', 'Layout', 'Manual'].includes(state.page)) {
+    const nextRail = JSON.stringify([state.snapshot?.preview, state.previewVisible, state.snapshot?.manual_mode]);
+    if (nextRail !== railShape) { const rail = document.querySelector('.preview-rail > .card'); if (rail) { const template = document.createElement('template'); template.innerHTML = preview(state, state.page !== 'Manual'); rail.replaceWith(template.content.firstElementChild); } railShape = nextRail; }
   }
   const nextSave = `${state.page}:${state.dirty}:${state.busy}:${state.canSave}`;
   if (nextSave !== saveShape) {
     $('#save-strip').hidden = !state.canSave;
-    $('#save-strip').innerHTML = `<div class="text-xs ${state.dirty ? 'secondary' : 'muted'}">${state.dirty ? 'You have unsaved changes' : 'All changes saved'}<span class="hidden sm:inline muted"> · Changes stay with each tab</span></div><div class="flex gap-2 shrink-0"><button class="btn btn-ghost" data-command="reload" ${state.busy ? 'disabled' : ''}>Reload</button><button class="btn btn-primary" data-command="save" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Working…' : 'Save changes'}</button></div>`;
+    $('#save-strip').innerHTML = `<div class="text-xs ${state.dirty ? 'secondary' : 'muted'}">${state.dirty ? 'You have unsaved changes' : 'All changes saved'}<span class="hidden sm:inline muted"> · Changes stay with each tab</span></div><div class="flex gap-2 shrink-0"><button class="btn btn-ghost" data-command="reload" ${state.busy ? 'disabled' : ''}>Reload</button><button class="btn btn-primary" data-command="save" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Working…' : state.page === 'Manual' ? 'Save profile' : 'Save changes'}</button></div>`;
     saveShape = nextSave;
   }
   $('#footer-dot').className = `status status-xs ${toneClass(state.visual.tone)}`;
@@ -255,11 +269,28 @@ document.addEventListener('toggle', event => {
 $('#decision').addEventListener('cancel', event => { event.preventDefault(); post('command', { name: 'cancel-decision' }); });
 document.addEventListener('keydown', event => {
   if (event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); post('command', { name: 'save' }); }
-  else if (event.ctrlKey && /^[1-5]$/.test(event.key)) { event.preventDefault(); post('navigate', { page: pages[Number(event.key) - 1] }); }
+  else if (event.ctrlKey && /^[1-6]$/.test(event.key)) { event.preventDefault(); post('navigate', { page: pages[Number(event.key) - 1] }); }
   else if (event.key === 'Escape') document.querySelectorAll('details.dropdown[open]').forEach(menu => menu.open = false);
   else if (event.target.closest('#navigation') && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-    event.preventDefault(); const index = pages.indexOf(current.page); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 4 : (index + (event.key === 'ArrowDown' ? 1 : 4)) % 5; post('navigate', { page: pages[next] });
+    event.preventDefault(); const index = pages.indexOf(current.page); const next = event.key === 'Home' ? 0 : event.key === 'End' ? pages.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : pages.length - 1)) % pages.length; post('navigate', { page: pages[next] });
   }
 });
 window.chrome?.webview?.addEventListener('message', event => window.receive(event.data));
 post('ready');
+
+const engineActions = $('#engine-actions');
+function positionEngineActions() {
+  if (!engineActions.matches(':popover-open')) return;
+  const button = $('#engine-more');
+  if (!button) { engineActions.hidePopover(); return; }
+  const bounds = button.getBoundingClientRect();
+  const width = engineActions.offsetWidth, height = engineActions.offsetHeight;
+  const left = Math.max(8, Math.min(innerWidth - width - 8, bounds.right - width));
+  const below = bounds.bottom + 8;
+  const top = below + height <= innerHeight - 8 ? below : Math.max(8, bounds.top - height - 8);
+  Object.assign(engineActions.style, { left: `${left}px`, top: `${top}px` });
+}
+engineActions.addEventListener('toggle', positionEngineActions);
+engineActions.addEventListener('click', event => { if (event.target.closest('button')) engineActions.hidePopover(); });
+window.addEventListener('resize', positionEngineActions);
+$('#scroll').addEventListener('scroll', () => { if (engineActions.matches(':popover-open')) engineActions.hidePopover(); }, { passive: true });

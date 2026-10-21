@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-21
+
+### Added
+
+- Explicit desktop-bridge manual mode with validated activity text and connection/update/session/local/custom timestamps. Preserve application identity and privacy mode, and honor publication pause and application priority.
+- Additive snapshot fields for manual mode, acknowledgment revision and manual timestamps. Manual mode never persists across runtime restarts and cannot unlock the real-work startup gate.
+
+### Fixed
+
+- Wake the desktop bridge promptly on control messages while keeping the existing publish throttle and reconnect backoff.
+
+
 ## [1.11.2] - 2026-09-19
 
 ### Fixed

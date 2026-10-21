@@ -784,10 +784,30 @@ pub fn run_desktop_bridge(
     };
     let input_priority = Arc::clone(&priority);
     let (wake_sender, wake_receiver) = std::sync::mpsc::channel();
+    let (manual_sender, manual_receiver) = std::sync::mpsc::channel();
+    let mut manual: Option<crate::manual::ManualSession> = None;
+    let mut manual_error: Option<String> = None;
+    let mut manual_revision = 0_u64;
     thread::spawn(move || {
         for line in io::stdin().lock().lines() {
             let finished = line.map_or(true, |line| {
-                !apply_bridge_control(line.trim(), &input_priority)
+                let command = line.trim();
+                if command == "automatic" {
+                    let _ = manual_sender.send(Ok(None));
+                } else if let Some(json) = command.strip_prefix("manual ") {
+                    let result = if json.len() <= 8192 {
+                        serde_json::from_str::<crate::manual::ManualProfile>(json)
+                            .map_err(|_| "The manual profile could not be read.".to_string())
+                            .and_then(|profile| {
+                                profile.validate(Utc::now().timestamp())?;
+                                Ok(Some(profile))
+                            })
+                    } else {
+                        Err("The manual profile is too large.".to_string())
+                    };
+                    let _ = manual_sender.send(result);
+                }
+                !apply_bridge_control(command, &input_priority)
             });
             let _ = wake_sender.send(());
             if finished {
@@ -805,6 +825,26 @@ pub fn run_desktop_bridge(
     let sessions_roots = config::sessions_paths();
     while !stop.load(Ordering::Relaxed) {
         reload_runtime_config(&mut config);
+        for command in manual_receiver.try_iter() {
+            manual_revision = manual_revision.saturating_add(1);
+            match command {
+                Ok(Some(profile)) => {
+                    let now = Utc::now().timestamp();
+                    let started_at = manual.as_ref().map_or(now, |value| value.started_at);
+                    manual = Some(crate::manual::ManualSession {
+                        profile,
+                        started_at,
+                        updated_at: now,
+                    });
+                    manual_error = None;
+                }
+                Ok(None) => {
+                    manual = None;
+                    manual_error = None;
+                }
+                Err(error) => manual_error = Some(error),
+            }
+        }
         let snapshot = collect_runtime_snapshot(
             &sessions_roots,
             &runtime,
@@ -815,18 +855,27 @@ pub fn run_desktop_bridge(
             &mut plan_detector,
         )?;
         let priority_held = priority.load(Ordering::Relaxed);
-        let startup_waiting = startup_gate.observe(
+        let waiting_for_real_work = startup_gate.observe(
             snapshot
                 .sessions
                 .iter()
                 .filter_map(|session| session.activity.as_ref()?.last_work_started_at),
         );
+        let startup_waiting = waiting_for_real_work && manual.is_none();
         let active = snapshot.active_session();
         let idle_remaining =
             discord.idle_timeout_remaining_at(active, &config, Utc::now().timestamp());
-        let idle_hidden = idle_remaining == Some(0);
+        let idle_hidden = manual.is_none() && idle_remaining == Some(0);
         if !observe {
-            if priority_held || startup_waiting {
+            if let Some(session) = &manual {
+                if let Err(error) = discord.update_manual(
+                    session,
+                    &config,
+                    config.presence_enabled && !priority_held,
+                ) {
+                    eprintln!("{error:#}");
+                }
+            } else if priority_held || startup_waiting {
                 let mut publication = config.clone();
                 publication.presence_enabled = false;
                 publish_runtime_snapshot(
@@ -844,23 +893,40 @@ pub fn run_desktop_bridge(
                 );
             }
         }
-        let surface = active
-            .and_then(CodexSessionSnapshot::detected_surface)
-            .unwrap_or(PresenceSurface::Desktop);
-        let preview = match active {
-            Some(session) => crate::discord::active_presence_presentation_with_credits(
-                surface,
-                session,
-                snapshot.effective_limits(),
-                snapshot.effective_credits(),
-                &snapshot.resolved_plan,
-                &snapshot.resolved_service_tier,
-                &config,
-            ),
-            None => crate::discord::idle_presence_presentation(surface, &config),
+        let surface = if manual.is_some() {
+            PresenceSurface::Desktop
+        } else {
+            active
+                .and_then(CodexSessionSnapshot::detected_surface)
+                .unwrap_or(PresenceSurface::Desktop)
         };
+        let preview = if let Some(session) = &manual {
+            crate::discord::manual_presence_presentation(session, &config)
+        } else {
+            match active {
+                Some(session) => crate::discord::active_presence_presentation_with_credits(
+                    surface,
+                    session,
+                    snapshot.effective_limits(),
+                    snapshot.effective_credits(),
+                    &snapshot.resolved_plan,
+                    &snapshot.resolved_service_tier,
+                    &config,
+                ),
+                None => crate::discord::idle_presence_presentation(surface, &config),
+            }
+        };
+        let manual_timestamps = manual
+            .as_ref()
+            .map(|value| discord.manual_timestamps(value));
         let value = serde_json::json!({
             "schema_version": 1,
+            "manual_mode": manual.is_some(),
+            "manual_revision": manual_revision,
+            "manual_error": manual_error,
+            "manual_updated_at": manual.as_ref().map(|value| value.updated_at),
+            "manual_start_epoch": manual_timestamps.and_then(|value| value.0),
+            "manual_end_epoch": manual_timestamps.and_then(|value| value.1),
             "snapshot_at": Utc::now(),
             "discord_status": if startup_waiting { "Waiting for new Codex activity" } else if priority_held { "Priority app active · Codex presence cleared" } else if idle_hidden { "Hidden · idle timeout reached" } else if observe { "Monitoring only" } else { discord.status() },
             "discord_application_id": config.effective_client_id_for_surface(surface),
@@ -871,7 +937,7 @@ pub fn run_desktop_bridge(
             "priority_held": priority_held,
             "idle_timeout_hidden": idle_hidden,
             "idle_timeout_remaining_seconds": idle_remaining,
-            "timer_paused": crate::discord::timer_should_pause(active, &config),
+            "timer_paused": manual.is_none() && crate::discord::timer_should_pause(active, &config),
             "plan": snapshot.resolved_plan.status_label(),
             "plan_details": snapshot.resolved_plan,
             "speed": snapshot.resolved_service_tier.fast_mode_label(),
@@ -914,7 +980,12 @@ pub fn run_desktop_bridge(
             && priority.load(Ordering::Relaxed) == priority_held
         {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let _ = wake_receiver.recv_timeout(remaining.min(Duration::from_secs(1)));
+            if wake_receiver
+                .recv_timeout(remaining.min(Duration::from_secs(1)))
+                .is_ok()
+            {
+                break;
+            }
         }
     }
     discord.shutdown();

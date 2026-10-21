@@ -284,12 +284,44 @@ public sealed class Backend
         finally { Starting = false; }
     }
 
+    private readonly SemaphoreSlim controlWrites = new(1, 1);
+
+    private async Task SendControl(string command)
+    {
+        await controlWrites.WaitAsync();
+        try
+        {
+            var child = process;
+            if (child == null || child.HasExited) throw new IOException("Start the engine first.");
+            await child.StandardInput.WriteLineAsync(command);
+            await child.StandardInput.FlushAsync();
+        }
+        finally { controlWrites.Release(); }
+    }
+
+    public async Task SetManualPresence(JsonObject? profile)
+    {
+        var before = Snapshot?["manual_revision"]?.GetValue<long>() ?? 0;
+        await SendControl(profile == null ? "automatic" : "manual " + profile.ToJsonString());
+        for (var attempt = 0; attempt < 150; attempt++)
+        {
+            var value = Snapshot;
+            if (value != null && (value["manual_revision"]?.GetValue<long>() ?? 0) > before)
+            {
+                if (value["manual_error"] is JsonValue error && error.TryGetValue<string>(out var text)) throw new IOException(text);
+                if (value["manual_mode"]?.GetValue<bool>() == (profile != null)) return;
+            }
+            await Task.Delay(100);
+        }
+        throw new IOException("The engine did not acknowledge the mode change. Check Tools and try again.");
+    }
+
     public async Task SetPriorityHold(bool held)
     {
         if (PriorityHeld == held) return;
         var child = process;
         if (child == null || child.HasExited) { PriorityHeld = held; return; }
-        try { await child.StandardInput.WriteLineAsync(held ? "yield" : "resume"); await child.StandardInput.FlushAsync(); PriorityHeld = held; }
+        try { await SendControl(held ? "yield" : "resume"); PriorityHeld = held; }
         catch (Exception error) when (error is IOException or InvalidOperationException)
         {
             LastError = error.Message;
@@ -306,7 +338,7 @@ public sealed class Backend
                 try
                 {
                     if (JsonNode.Parse(line) is not JsonObject value) { Logged?.Invoke(line); continue; }
-                    if (value["startup_waiting"] is JsonValue waiting && waiting.TryGetValue<bool>(out var pending) && !pending) WaitForNewWork = false;
+                    if (value["manual_mode"]?.GetValue<bool>() != true && value["startup_waiting"] is JsonValue waiting && waiting.TryGetValue<bool>(out var pending) && !pending) WaitForNewWork = false;
                     Volatile.Write(ref snapshot, value);
                     Updated?.Invoke(value);
                     ready.TrySetResult(true);
@@ -342,7 +374,7 @@ public sealed class Backend
     {
         var child = process;
         if (child == null || child.HasExited) return;
-        try { await child.StandardInput.WriteLineAsync("quit"); child.StandardInput.Close(); }
+        try { await SendControl("quit"); }
         catch (IOException) { }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         try { await child.WaitForExitAsync(timeout.Token); if (completion != null) await completion.WaitAsync(timeout.Token); }

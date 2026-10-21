@@ -1,5 +1,13 @@
 # Desktop release notes
 
+## 3.1.0
+
+- Correct resize corners by retaining an 8px native resize gutter around the browser. Collapse the unused native layout and defer snapshot refresh, motion and geometry writes during a resize drag. Keep maximized content inside the current monitor working area, above the taskbar.
+- Let dashboard cards, statistics, settings and preview panels use the available width, including beyond the previous content cap.
+- Move the overflow menu to the browser's top layer, keep it inside the viewport and support Escape/outside-click dismissal. Remove sidebar taglines.
+- Add a separate Manual presence section with editable activity text and connection, update, session, local clock and custom start/end timing. Save profiles separately; enable manual mode explicitly. Returning to automatic preserves the real-work startup gate. Pause, privacy mode and game priority still apply.
+- Include Rust engine 1.12.0. Normal presence composition and existing configuration schemas stay unchanged.
+
 ## 3.0.0
 
 - Replace the top-tab interface with a local daisyUI 5 / Tailwind CSS 4 workspace hosted in WebView2. Add a full sidebar that becomes an icon rail on smaller windows.

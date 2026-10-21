@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod cost;
 pub mod discord;
+pub mod manual;
 pub mod metrics;
 pub mod model;
 pub mod opencode;

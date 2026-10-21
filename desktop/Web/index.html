@@ -11,13 +11,11 @@
 <body>
   <div class="app-shell">
     <aside class="app-sidebar" aria-label="Main navigation">
-      <div class="sidebar-brand"><img src="logo.png" alt=""><div class="sidebar-copy">Codex Presence<small>Your work, in presence.</small></div></div>
-      <div class="nav-label">Workspace</div>
+      <div class="sidebar-brand"><img src="logo.png" alt=""><div class="sidebar-copy">Codex Presence</div></div>
       <ul class="menu" id="navigation"></ul>
       <div class="mt-auto pt-6">
         <div class="border-t border-base-content/10 pt-4 px-2">
           <div class="flex items-center gap-2"><span id="sidebar-status" class="status status-sm"></span><span id="sidebar-state" class="sidebar-footer-copy text-xs font-medium">Starting</span></div>
-          <p class="sidebar-footer-copy muted text-xs mt-2 leading-relaxed">Local session monitoring.<br>No account connection needed.</p>
           <button class="btn btn-ghost btn-sm mt-3 w-full" data-command="background" title="Keep monitoring in the background"><span id="background-icon"></span><span class="sidebar-footer-copy">Run in background</span></button>
         </div>
       </div>
@@ -28,6 +26,7 @@
       <footer class="footer-strip" role="status" aria-live="polite"><span id="footer-dot" class="status status-xs"></span><span id="footer-text">Starting Codex Presence…</span></footer>
     </main>
   </div>
+  <ul id="engine-actions" popover class="dropdown menu bg-base-100 border border-base-content/10 rounded-box w-56 p-2 shadow-xl" aria-label="Engine actions"><li><button data-command="background">Run in background</button></li><li><button data-command="exit" class="text-error">Exit Presence</button></li></ul>
   <dialog class="modal" id="decision"><div class="modal-box" id="decision-body"></div></dialog>
   <div class="toast toast-end toast-bottom" id="toasts" role="status" aria-live="polite"></div>
 </body>

@@ -46,7 +46,7 @@ public partial class MainWindow
             foreach (var target in navigation.Keys)
             {
                 await Page(target); await Capture(target);
-                Check(await Script("document.querySelectorAll('#navigation button').length === 5 && !document.querySelector('#page').textContent.includes('[object Object]')") == "true", target + " renders all navigation and native content");
+                Check(await Script("document.querySelectorAll('#navigation button').length === 6 && !document.querySelector('#page').textContent.includes('[object Object]')") == "true", target + " renders all navigation and native content");
                 if (target != "Overview") Check(await Script("document.querySelectorAll('[data-control]').length") == webControls.Values.Count(element => element is TextBox or CheckBox or ComboBox).ToString(), target + " exposes every native form control");
                 Check(await Script("document.documentElement.scrollWidth <= innerWidth && document.body.scrollHeight <= innerHeight") == "true", target + " has no window overflow");
             }
@@ -103,6 +103,74 @@ public partial class MainWindow
                     Check(await Script("document.documentElement.scrollWidth <= innerWidth && document.body.scrollHeight <= innerHeight") == "true", target + " fits browser window width " + size.Item1);
                 }
             }
+            await Page("Overview");
+            var widths = new List<double>();
+            foreach (var width in new[] { 1100d, 1500d, 1750d })
+            {
+                Width = width; await Task.Delay(250);
+                widths.Add(JsonSerializer.Deserialize<double>(await Script("document.querySelector('#engine-region > .card').getBoundingClientRect().width")));
+                Check(await Script("Math.abs(document.querySelector('.page-content').getBoundingClientRect().width - document.querySelector('.stats').getBoundingClientRect().width) < 2") == "true", "Statistics stretch with content at width " + width);
+                await Script("document.querySelector('#engine-more').click()"); await Task.Delay(150);
+                await Capture("Menu-" + width);
+                var menuStatus = await Script("(() => { const menu=document.querySelector('#engine-actions'), r=menu.getBoundingClientRect(); return { open:menu.matches(':popover-open'), left:r.left, top:r.top, width:r.width, bottom:r.bottom, viewport:innerHeight, hit:document.elementFromPoint(r.left+20,r.top+20)?.outerHTML?.slice(0,150) }; })()");
+                Check(await Script("(() => { const menu=document.querySelector('#engine-actions'), r=menu.getBoundingClientRect(); return menu.matches(':popover-open') && r.top >= 0 && r.bottom <= innerHeight && document.elementFromPoint(r.left+20,r.top+20)?.closest('#engine-actions') !== null; })()") == "true", "Overflow menu is visible above cards at width " + width + " " + menuStatus);
+                await Script("document.querySelector('#engine-actions').hidePopover()");
+            }
+            Check(widths[1] > widths[0] + 100 && widths[2] > widths[1] + 50, "Cards keep growing past the previous fixed content width");
+            Check(NativeViews.Visibility == Visibility.Collapsed && webInterface!.Margin.Left >= 8 && webInterface.Margin.Bottom >= 8, "Hidden native layout is collapsed and the browser leaves a native resize gutter");
+            var handled = false;
+            ResizeWindowMessage(IntPtr.Zero, 0x0231, IntPtr.Zero, IntPtr.Zero, ref handled);
+            await Task.Delay(150);
+            Check(windowResizing && !refreshTimer.IsEnabled && await Script("document.documentElement.hasAttribute('data-resizing')") == "true", "Interactive resizing defers snapshot layout and disables motion");
+            ResizeWindowMessage(IntPtr.Zero, 0x0232, IntPtr.Zero, IntPtr.Zero, ref handled);
+            await Task.Delay(150);
+            Check(!windowResizing && await Script("!document.documentElement.hasAttribute('data-resizing')") == "true", "Resize completion restores live interface updates");
+            WindowState = WindowState.Maximized; await Task.Delay(500);
+            var workArea = System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle).WorkingArea;
+            var browserBottom = webInterface!.PointToScreen(new Point(0, webInterface.ActualHeight));
+            Check(browserBottom.Y <= workArea.Bottom + 1, "Maximized browser and footer stay above the taskbar");
+            WindowState = WindowState.Normal; Width = 1100; Height = 860; await Task.Delay(200);
+            await Page("Manual");
+            Check(await Script("document.querySelector('h1').textContent === 'Manual presence' && document.querySelector('select[aria-label=\"Timestamp option\"]').options.length === 5") == "true", "Manual presence is a separate section with all five timeline options");
+            await backend.Stop(); backend.WaitForNewWork = true; await backend.Start();
+            Check(B(backend.Snapshot?["startup_waiting"]), "Automatic startup remains gated before a new real Codex prompt");
+            var automaticPreview = backend.Snapshot!["preview"]!.ToJsonString();
+            await Script("{ const field=document.querySelector('input[aria-label=\"Activity and project\"]'); field.value='Thinking · Manual fixture'; field.dispatchEvent(new Event('input',{bubbles:true})); const second=document.querySelector('input[aria-label=\"Second line (optional)\"]'); second.value='Model · High'; second.dispatchEvent(new Event('input',{bubbles:true})); }");
+            await Wait(() => Task.FromResult(manualProfileUnsaved));
+            Check(await Script("current.dirtyTabs.includes('Manual')") == "true", "Manual text edits show an unsaved marker without publishing");
+            foreach (var mode in new[] { "session", "connection", "update", "local", "custom" })
+            {
+                var modes = new[] { "connection", "update", "session", "local", "custom" };
+                await Script($"{{ const select=document.querySelector('select[aria-label=\"Timestamp option\"]'); select.selectedIndex={Array.IndexOf(modes, mode)}; select.dispatchEvent(new Event('change',{{bubbles:true}})); }}");
+                await Wait(() => Task.FromResult(S(LoadManualProfile()["timestamp_mode"]) == mode));
+                if (mode == "custom")
+                {
+                    var start = JsonSerializer.Serialize(DateTime.Now.AddHours(-1).ToString("yyyy-MM-ddTHH:mm"));
+                    var end = JsonSerializer.Serialize(DateTime.Now.AddHours(1).ToString("yyyy-MM-ddTHH:mm"));
+                    await Script($"{{ const start=document.querySelector('input[aria-label=\"Start (local date and time)\"]'); start.value={start}; start.dispatchEvent(new Event('input',{{bubbles:true}})); const end=document.querySelector('input[aria-label=\"End (optional local date and time)\"]'); end.value={end}; end.dispatchEvent(new Event('input',{{bubbles:true}})); }}");
+                }
+                var revision = N(backend.Snapshot?["manual_revision"]);
+                await Script("[...document.querySelectorAll('button[data-action]')].find(button=>button.textContent==='Start or apply manual presence').click()");
+                await Wait(() => Task.FromResult(!busy && N(backend.Snapshot?["manual_revision"]) > revision));
+                Check(!manualProfileUnsaved && File.ReadAllText(ManualProfilePath).Contains("Manual fixture"), mode + " applies and saves the profile through the real browser action");
+                if (mode == "custom") await Capture("Manual-Custom-Active");
+                Check(B(backend.Snapshot?["manual_mode"]) && S(backend.Snapshot?["preview"]?["details"]) == "Thinking · Manual fixture", mode + " uses the explicit manual text without altering session metrics");
+                Check(File.ReadAllText(backend.ConfigPath) != "" && !File.ReadAllText(backend.ConfigPath).Contains("Manual fixture"), mode + " keeps manual settings out of shared runtime configuration");
+                if (mode == "custom") Check(N(backend.Snapshot?["manual_end_epoch"]) > N(backend.Snapshot?["manual_start_epoch"]), "Custom countdown retains distinct start and end timestamps");
+            }
+            Check(backend.WaitForNewWork, "Manual mode does not unlock the real-work startup gate");
+            await backend.SetPriorityHold(true);
+            await Wait(() => Task.FromResult(B(backend.Snapshot?["priority_held"])));
+            Check(B(backend.Snapshot?["manual_mode"]) && !B(backend.Snapshot?["presence_enabled"]), "App priority holds manual presence without losing its selected profile");
+            await backend.SetPriorityHold(false);
+            await backend.SetManualPresence(null);
+            Check(B(backend.Snapshot?["startup_waiting"]), "Returning to automatic still waits for fresh real work");
+            Check(!B(backend.Snapshot?["manual_mode"]) && backend.Snapshot!["preview"]!.ToJsonString() == automaticPreview, "Returning to automatic restores the original Discord preview exactly");
+            LoadManualProfile()["timestamp_mode"] = "session";
+            await ApplyManualPresence(); await backend.Stop(); await backend.Start();
+            Check(!B(backend.Snapshot?["manual_mode"]), "Restarting the engine does not automatically resume manual presence");
+            backend.WaitForNewWork = false; await backend.Stop(); await backend.Start();
+            await Page("Overview");
             Check(await Script("!!document.querySelector('[data-command=background]') && getComputedStyle(document.querySelector('.menu')).display !== 'none'") == "true", "Background and navigation remain available at every window size");
             Width = 1100; Height = 860;
             foreach (var scale in new[] { 1d, 1.25, 1.5, 2d })

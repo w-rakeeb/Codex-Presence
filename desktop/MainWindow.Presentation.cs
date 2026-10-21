@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Linq;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -20,6 +22,7 @@ namespace CodexPresence;
 
 public partial class MainWindow
 {
+    private bool windowResizing;
     private WindowPresentationState windowPresentation = new();
     private DispatcherTimer? presentationTimer;
     private DispatcherTimer? positionTimer;
@@ -47,7 +50,11 @@ public partial class MainWindow
             Top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - Height));
             WindowStartupLocation = WindowStartupLocation.Manual;
         }
-        SourceInitialized += (_, _) => Appearance.Apply(this, backend.Options);
+        SourceInitialized += (_, _) =>
+        {
+            Appearance.Apply(this, backend.Options);
+            HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(ResizeWindowMessage);
+        };
         SystemParameters.StaticPropertyChanged += SystemPresentationChanged;
         Closed += (_, _) =>
         {
@@ -57,12 +64,12 @@ public partial class MainWindow
         };
         positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         positionTimer.Tick += async (_, _) => { positionTimer.Stop(); await SaveWindowPresentation(); };
-        SizeChanged += (_, _) => { if (initialized && !testMode) positionTimer.Start(); };
-        LocationChanged += (_, _) => { if (initialized && !testMode) positionTimer.Start(); };
+        SizeChanged += (_, _) => { QueueWindowPresentationSave(); };
+        LocationChanged += (_, _) => { QueueWindowPresentationSave(); };
         presentationTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         presentationTimer.Tick += (_, _) =>
         {
-            if (!IsVisible) return;
+            if (!IsVisible || windowResizing) return;
             UpdateFooterPresentation();
             if (page is "Privacy" or "Layout") foreach (var update in editorPreviewUpdates) update(backend.Snapshot);
         };
@@ -79,6 +86,58 @@ public partial class MainWindow
                 NavigateFromKeyboard(names[next]); e.Handled = true;
             }
         };
+    }
+
+    private void QueueWindowPresentationSave()
+    {
+        if (!initialized || testMode || windowResizing || positionTimer == null) return;
+        positionTimer.Stop();
+        positionTimer.Start();
+    }
+
+    private IntPtr ResizeWindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message == 0x0024 && lParam != IntPtr.Zero)
+        {
+            var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
+            var work = screen.WorkingArea; var monitor = screen.Bounds;
+            var limits = Marshal.PtrToStructure<NativeWindowLimits>(lParam);
+            var dpi = VisualTreeHelper.GetDpi(this);
+            limits.MaxPosition = new NativeWindowPoint { X = work.Left - monitor.Left, Y = work.Top - monitor.Top };
+            limits.MaxSize = new NativeWindowPoint { X = work.Width, Y = work.Height };
+            limits.MinTrackSize = new NativeWindowPoint { X = (int)Math.Ceiling(MinWidth * dpi.DpiScaleX), Y = (int)Math.Ceiling(MinHeight * dpi.DpiScaleY) };
+            Marshal.StructureToPtr(limits, lParam, false);
+            handled = true;
+        }
+        else if (message == 0x0231)
+        {
+            windowResizing = true;
+            refreshTimer.Stop();
+            positionTimer?.Stop();
+            if (webReady) webInterface?.CoreWebView2?.PostWebMessageAsJson("{\"type\":\"resizing\",\"active\":true}");
+        }
+        else if (message == 0x0232)
+        {
+            windowResizing = false;
+            QueueWindowPresentationSave();
+            if (webReady) webInterface?.CoreWebView2?.PostWebMessageAsJson("{\"type\":\"resizing\",\"active\":false}");
+            if (IsVisible && page == "Overview") refreshTimer.Start();
+            if (webReady) SendWebState();
+        }
+        return IntPtr.Zero;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeWindowPoint { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeWindowLimits
+    {
+        public NativeWindowPoint Reserved;
+        public NativeWindowPoint MaxSize;
+        public NativeWindowPoint MaxPosition;
+        public NativeWindowPoint MinTrackSize;
+        public NativeWindowPoint MaxTrackSize;
     }
 
     private void SystemPresentationChanged(object? sender, PropertyChangedEventArgs e)
@@ -158,7 +217,7 @@ public partial class MainWindow
         var state = visualStateOverride ?? (!backend.Running ? backend.LastError == null ? "stopped" : "error" : backend.Starting && snapshot == null ? "loading" : !backend.PublicationEnabled ? "paused" : B(snapshot?["startup_waiting"]) ? "idle" : status.StartsWith("Connected", StringComparison.OrdinalIgnoreCase) ? "live" : status.Contains("error", StringComparison.OrdinalIgnoreCase) || status.Contains("failed", StringComparison.OrdinalIgnoreCase) ? "error" : "waiting");
         return state switch
         {
-            "live" => new("Presence is live", "Connected to Discord", "Success"),
+            "live" => new(B(snapshot?["manual_mode"]) ? "Manual presence is live" : "Presence is live", "Connected to Discord", "Success"),
             "paused" => new("Presence paused", "Local session monitoring continues", "Warning"),
             "stopped" => new("Engine stopped", "Start the engine to watch for Codex activity", "Neutral"),
             "loading" => new("Reading your session", "Starting the presence engine…", "Accent"),
@@ -260,7 +319,7 @@ public partial class MainWindow
             title.Text = S(preview?["app_name"], "Codex App");
             details.Text = S(preview?["details"], ""); state.Text = S(preview?["state"], "");
             privacyHint.Visibility = (string.IsNullOrWhiteSpace(details.Text) || string.IsNullOrWhiteSpace(state.Text)) && backend.Config?["privacy"] is JsonObject privacy && (B(privacy["enabled"]) || privacy.Any(pair => pair.Key.StartsWith("show_", StringComparison.Ordinal) && pair.Value is JsonValue field && field.TryGetValue<bool>(out var visible) && !visible)) ? Visibility.Visible : Visibility.Collapsed;
-            var empty = preview == null || B(snapshot?["startup_waiting"]) || snapshot?["sessions"] is not JsonArray sessions || sessions.Count == 0 || visualStateOverride is "idle" or "loading" or "stopped";
+            var empty = preview == null || B(snapshot?["startup_waiting"]) || (!B(snapshot?["manual_mode"]) && (snapshot?["sessions"] is not JsonArray sessions || sessions.Count == 0)) || visualStateOverride is "idle" or "loading" or "stopped";
             row.Visibility = empty ? Visibility.Collapsed : Visibility.Visible; hidden.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
             hidden.Text = visualStateOverride == "loading" ? "Reading Codex sessions…" : "Nothing to show yet · send a new Codex prompt";
             AutomationProperties.SetName(card, "Discord preview, " + (empty ? hidden.Text : title.Text + ", " + details.Text + ", " + state.Text));

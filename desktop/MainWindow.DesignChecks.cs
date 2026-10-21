@@ -86,7 +86,7 @@ public partial class MainWindow
                 foreach (var target in navigation.Keys)
                 {
                     Fresh(target);
-                    Check(PageBody.ActualWidth <= 720 && PageBody.ActualWidth <= PageScroll.ActualWidth && navigation.Values.All(button => button.ActualWidth >= 32), target + " fits " + size.Item1 + " × " + size.Item2 + " with a 720px content limit");
+                    Check(PageBody.ActualWidth <= PageScroll.ActualWidth && (size.Item1 <= 720 || PageBody.ActualWidth > 720) && navigation.Values.All(button => button.ActualWidth >= 32), target + " fits " + size.Item1 + " × " + size.Item2 + " with content sized to the available window width");
                     Capture(target + "-" + size.Item1);
                 }
             }

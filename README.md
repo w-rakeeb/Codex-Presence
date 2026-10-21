@@ -2,7 +2,7 @@
 
 A small Windows desktop companion that publishes your Codex activity to Discord. Choose what people can see, preview your presence, and keep the app running quietly in the background.
 
-Version 3 introduces a full daisyUI workspace: sidebar navigation, a redesigned live dashboard, a responsive Discord preview rail, searchable setting sections and a persistent save area. The interface is bundled locally inside the Windows app using WebView2; background startup does not launch a browser. [Design and architecture](docs/desktop-design-v3.md).
+Version 3.1 adds a separate Manual presence section with custom activity and five timestamp modes, fixes overflow-menu placement, and lets panels resize with the window. Version 3 introduces a full daisyUI workspace: sidebar navigation, a redesigned live dashboard, a responsive Discord preview rail, searchable setting sections and a persistent save area. The interface is bundled locally inside the Windows app using WebView2; background startup does not launch a browser. [Design and architecture](docs/desktop-design-v3.md).
 
 [Download for Windows](https://github.com/w-rakeeb/Codex-Presence/releases/latest) · [Complete guide](desktop/Guide.md) · [Release notes](docs/desktop-changelog.md) · [Original engine](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence)
 

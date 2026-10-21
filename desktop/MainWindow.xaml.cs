@@ -108,7 +108,7 @@ public partial class MainWindow : Window
         priorityTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         priorityTimer.Tick += (_, _) => { if (!busy && !checkingPriority && !testMode && backend.Running) _ = ObservePriority(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) everShown = true; else refreshTimer.Stop(); };
-        foreach (var name in new[] { "Overview", "Privacy", "Layout", "Settings", "Tools" })
+        foreach (var name in new[] { "Overview", "Privacy", "Layout", "Settings", "Tools", "Manual" })
         {
             var button = ActionButton(name, () => Navigate(name));
             button.Content = NavigationContent(name, button);
@@ -138,7 +138,7 @@ public partial class MainWindow : Window
             if (closing) return;
             UpdateTrayPresentation(EnginePresentation(snapshot));
             if (tray.Visible) { var text = "Codex Presence · " + S(snapshot["discord_status"]); text = text.Substring(0, Math.Min(63, text.Length)); if (tray.Text != text) tray.Text = text; }
-            if (IsVisible && page == "Overview") refreshTimer.Start();
+            if (IsVisible && !windowResizing && page == "Overview") refreshTimer.Start();
         });
         backend.Logged += line => Dispatcher.BeginInvoke(() =>
         {
@@ -162,13 +162,14 @@ public partial class MainWindow : Window
                 return;
             }
             if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
-            if (e.Key == Key.S && SaveHost.Visibility == Visibility.Visible) { e.Handled = true; _ = Guard(() => SaveDraft()); }
+            if (e.Key == Key.S && page == "Manual") { e.Handled = true; _ = Guard(SaveManualProfile); }
+            else if (e.Key == Key.S && SaveHost.Visibility == Visibility.Visible) { e.Handled = true; _ = Guard(() => SaveDraft()); }
             else if (e.Key == Key.Tab)
             {
                 var names = navigation.Keys.ToArray(); var step = (Keyboard.Modifiers & ModifierKeys.Shift) == 0 ? 1 : -1;
                 NavigateFromKeyboard(names[(Array.IndexOf(names, page) + step + names.Length) % names.Length]); e.Handled = true;
             }
-            else if (e.Key >= Key.D1 && e.Key <= Key.D5) { NavigateFromKeyboard(navigation.Keys.ElementAt(e.Key - Key.D1)); e.Handled = true; }
+            else if (e.Key >= Key.D1 && e.Key <= Key.D6) { NavigateFromKeyboard(navigation.Keys.ElementAt(e.Key - Key.D1)); e.Handled = true; }
         };
     }
 
@@ -276,6 +277,7 @@ public partial class MainWindow : Window
             case "Layout": RenderLayout(); break;
             case "Settings": RenderSettings(); break;
             case "Tools": RenderTools(); break;
+            case "Manual": RenderManual(); break;
         }
         PageScroll.ScrollToTop();
         RecordInteractiveState();
@@ -366,7 +368,7 @@ public partial class MainWindow : Window
         icon.SetBinding(System.Windows.Shapes.Path.StrokeProperty, new System.Windows.Data.Binding("Foreground") { Source = button });
         var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(icon);
-        var label = new TextBlock { Text = name == "Background" ? "Startup" : name == "Activity" ? "Behavior" : name, VerticalAlignment = VerticalAlignment.Center };
+        var label = new TextBlock { Text = name == "Background" ? "Startup" : name == "Activity" ? "Behavior" : name == "Manual" ? "Manual" : name, VerticalAlignment = VerticalAlignment.Center };
         label.SetBinding(TextBlock.FontSizeProperty, new System.Windows.Data.Binding("FontSize") { Source = button });
         panel.Children.Add(label);
         return panel;
@@ -1050,7 +1052,7 @@ public partial class MainWindow : Window
 
     private async Task ExitApp()
     {
-        if (dirty || editors.Values.Any(editor => editor.Dirty)) { ShowExitDecision(); return; }
+        if (manualProfileUnsaved || dirty || editors.Values.Any(editor => editor.Dirty)) { ShowExitDecision(); return; }
         if (terminalProcess is { HasExited: false }) throw new InvalidOperationException("Press Q in the original terminal to close it before exiting this app.");
         await backend.Stop();
         closing = true;

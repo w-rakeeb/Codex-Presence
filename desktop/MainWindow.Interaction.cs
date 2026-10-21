@@ -38,6 +38,7 @@ public partial class MainWindow
 
     private void UpdateResponsiveLayout()
     {
+        if (webReady) return;
         var narrow = ActualWidth < 460;
         PageScroll.Padding = new Thickness(narrow ? 16 : 24, 24, narrow ? 16 : 24, 24);
         SaveHost.Padding = new Thickness(narrow ? 12 : 20, 8, narrow ? 12 : 20, 8);
@@ -51,7 +52,7 @@ public partial class MainWindow
             var label = (TextBlock)content.Children[1];
             label.TextTrimming = TextTrimming.CharacterEllipsis;
             label.TextWrapping = TextWrapping.NoWrap;
-            label.MaxWidth = narrow ? Math.Max(10, (ActualWidth - 34) / 5 - 8) : double.PositiveInfinity;
+            label.MaxWidth = narrow ? Math.Max(10, (ActualWidth - 34) / navigation.Count - 8) : double.PositiveInfinity;
         }
         foreach (var sections in PageBody.Children.OfType<UniformGrid>().Where(grid => grid.Tag is Action<string>)) sections.Columns = narrow ? 2 : 4;
         foreach (var row in Elements<Grid>(PageBody).Where(row => row.Tag is string tag && tag == "LayoutField"))
@@ -198,14 +199,14 @@ public partial class MainWindow
         DecisionBody.Children.Add(detail);
         var review = ActionButton("Review changes", () =>
         {
-            var pending = dirty ? page : editors.First(pair => pair.Value.Dirty).Key;
+            var pending = manualProfileUnsaved ? "Manual" : dirty ? page : editors.First(pair => pair.Value.Dirty).Key;
             CloseDecision();
             Navigate(pending);
         });
         review.Style = (Style)FindResource("PrimaryButton");
         review.Margin = new Thickness(0, 0, 0, 8);
         DecisionBody.Children.Add(review);
-        var discard = AsyncButton("Exit without saving", async () => { dirty = false; editors.Clear(); CloseDecision(); await ExitApp(); });
+        var discard = AsyncButton("Exit without saving", async () => { manualProfileUnsaved = false; dirty = false; editors.Clear(); CloseDecision(); await ExitApp(); });
         discard.Margin = new Thickness(0, 0, 0, 8);
         DecisionBody.Children.Add(discard);
         DecisionBody.Children.Add(ActionButton("Cancel", CloseDecision));

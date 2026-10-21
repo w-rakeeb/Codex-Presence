@@ -38,7 +38,7 @@ public partial class MainWindow
             var folder = Path.Combine(root, "Web");
             if (!File.Exists(Path.Combine(folder, "index.html"))) throw new IOException("The bundled interface files are missing. Extract the complete release folder.");
             var canvas = ((SolidColorBrush)FindResource("Canvas")).Color;
-            webInterface = new WebView2 { Margin = new Thickness(0, 40, 0, 0), Visibility = Visibility.Hidden, DefaultBackgroundColor = System.Drawing.Color.FromArgb(canvas.A, canvas.R, canvas.G, canvas.B) };
+            webInterface = new WebView2 { Margin = new Thickness(8, 40, 8, 8), Visibility = Visibility.Hidden, DefaultBackgroundColor = System.Drawing.Color.FromArgb(canvas.A, canvas.R, canvas.G, canvas.B) };
             Panel.SetZIndex(webInterface, 20);
             ShellRoot.Children.Add(webInterface);
             var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(root, "Data", testMode ? "Verification\\WebView" : "WebView"));
@@ -59,7 +59,7 @@ public partial class MainWindow
             core.WebMessageReceived += WebMessage;
             core.ProcessFailed += (_, _) => { webReady = false; webInterface.Visibility = Visibility.Hidden; SetNativeViewAccess(true); Footer.Text = "The interface needs to reopen. Your settings are safe; restart the dashboard."; };
             webTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-            webTimer.Tick += (_, _) => { if (IsVisible && webReady) SendWebState(); };
+            webTimer.Tick += (_, _) => { if (IsVisible && webReady && !windowResizing) SendWebState(); };
             webTimer.Start();
             Closed += (_, _) => { webTimer.Stop(); webInterface.Dispose(); };
             if (!testMode && windowPresentation.InterfaceRevision < 3)
@@ -84,7 +84,7 @@ public partial class MainWindow
 
     private void SetNativeViewAccess(bool enabled)
     {
-        NativeViews.Visibility = enabled ? Visibility.Visible : Visibility.Hidden;
+        NativeViews.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         foreach (var native in new FrameworkElement[] { Navigation, PageScroll, SaveHost, StatusPanel })
         {
             System.Windows.Input.KeyboardNavigation.SetTabNavigation(native, enabled ? System.Windows.Input.KeyboardNavigationMode.Continue : System.Windows.Input.KeyboardNavigationMode.None);
@@ -116,6 +116,8 @@ public partial class MainWindow
                     case "stop": await Guard(StopEngine); break;
                     case "background": await Guard(RunInBackground); break;
                     case "exit": await Guard(ExitApp); break;
+                    case "save" when page == "Manual": await Guard(SaveManualProfile); break;
+                    case "reload" when page == "Manual": await Guard(ReloadManualProfile); break;
                     case "save" when SaveHost.Visibility == Visibility.Visible: await Guard(() => SaveDraft()); break;
                     case "reload" when SaveHost.Visibility == Visibility.Visible: await Guard(() => ReloadDraft()); break;
                     case "cancel-decision": CloseDecision(); break;
@@ -189,11 +191,11 @@ public partial class MainWindow
         return new JsonObject
         {
             ["page"] = page, ["section"] = settingsSection, ["nodes"] = nodes, ["running"] = backend.Running, ["busy"] = busy,
-            ["publicationEnabled"] = backend.PublicationEnabled, ["monitorOnly"] = backend.Options.MonitorOnly, ["dirty"] = dirty, ["canSave"] = SaveHost.Visibility == Visibility.Visible,
-            ["dirtyTabs"] = new JsonArray(navigation.Keys.Where(name => name == page ? dirty : editors.TryGetValue(name, out var retained) && retained.Dirty).Select(name => (JsonNode?)JsonValue.Create(name)).ToArray()),
+            ["publicationEnabled"] = backend.PublicationEnabled, ["monitorOnly"] = backend.Options.MonitorOnly, ["dirty"] = page == "Manual" ? manualProfileUnsaved : dirty, ["canSave"] = page == "Manual" || SaveHost.Visibility == Visibility.Visible,
+            ["dirtyTabs"] = new JsonArray(navigation.Keys.Where(name => name == "Manual" ? manualProfileUnsaved : name == page ? dirty : editors.TryGetValue(name, out var retained) && retained.Dirty).Select(name => (JsonNode?)JsonValue.Create(name)).ToArray()),
             ["footer"] = Footer.Text, ["visual"] = new JsonObject { ["headline"] = visual.Headline, ["detail"] = visual.Detail, ["tone"] = visual.Tone },
             ["snapshot"] = backend.Snapshot?.DeepClone(), ["decision"] = decision, ["theme"] = theme,
-            ["previewVisible"] = backend.Running && backend.Snapshot?["preview"] != null && !B(backend.Snapshot?["startup_waiting"]) && backend.Snapshot?["sessions"] is JsonArray { Count: > 0 } && visualStateOverride is not ("stopped" or "loading" or "idle"),
+            ["previewVisible"] = backend.Running && backend.Snapshot?["preview"] != null && !B(backend.Snapshot?["startup_waiting"]) && (B(backend.Snapshot?["manual_mode"]) || backend.Snapshot?["sessions"] is JsonArray { Count: > 0 }) && visualStateOverride is not ("stopped" or "loading" or "idle"),
             ["style"] = Elements<ComboBox>(PageBody).FirstOrDefault(combo => AutomationProperties.GetName(combo) == "Interface style")?.SelectedValue?.ToString() ?? backend.Options.InterfaceStyle,
             ["light"] = ((SolidColorBrush)FindResource("Canvas")).Color.R > 128
         };
