@@ -2,12 +2,16 @@
 
 A small Windows desktop companion that publishes your Codex activity to Discord. Choose what people can see, preview your presence, and keep the app running quietly in the background.
 
+Version 3 introduces a full daisyUI workspace: sidebar navigation, a redesigned live dashboard, a responsive Discord preview rail, searchable setting sections and a persistent save area. The interface is bundled locally inside the Windows app using WebView2; background startup does not launch a browser. [Design and architecture](docs/desktop-design-v3.md).
+
 [Download for Windows](https://github.com/w-rakeeb/Codex-Presence/releases/latest) · [Complete guide](desktop/Guide.md) · [Release notes](docs/desktop-changelog.md) · [Original engine](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence)
+
+![Desktop 3 workspace using a synthetic monitoring-only session](docs/screenshots/desktop-3/Overview.png)
 
 ## Get started
 
 1. Download the Windows x64 ZIP from Releases and extract the entire folder.
-2. Install the [Microsoft .NET 8 Desktop Runtime for x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) if Windows asks for it. The SDK is only needed to build from source.
+2. Install the [Microsoft .NET 8 Desktop Runtime for x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) if Windows asks for it. The new interface also uses [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). The SDK and Node.js are only needed to build from source.
 3. Open **Codex Presence.exe**, start Discord, and select **Start presence**. Send a new Codex prompt to begin showing your activity.
 4. Choose your visible fields in **Privacy** and **Layout**. Use **Settings** for appearance, timers and background startup.
 

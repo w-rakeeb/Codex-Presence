@@ -10,4 +10,5 @@
 .gitnexus
 /desktop/bin/
 /desktop/obj/
+/desktop/Web/node_modules/
 /Data/

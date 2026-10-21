@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-theme="dim">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <title>Codex Presence</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand"><img src="logo.png" alt=""><div class="sidebar-copy">Codex Presence<small>Your work, in presence.</small></div></div>
+      <div class="nav-label">Workspace</div>
+      <ul class="menu" id="navigation"></ul>
+      <div class="mt-auto pt-6">
+        <div class="border-t border-base-content/10 pt-4 px-2">
+          <div class="flex items-center gap-2"><span id="sidebar-status" class="status status-sm"></span><span id="sidebar-state" class="sidebar-footer-copy text-xs font-medium">Starting</span></div>
+          <p class="sidebar-footer-copy muted text-xs mt-2 leading-relaxed">Local session monitoring.<br>No account connection needed.</p>
+          <button class="btn btn-ghost btn-sm mt-3 w-full" data-command="background" title="Keep monitoring in the background"><span id="background-icon"></span><span class="sidebar-footer-copy">Run in background</span></button>
+        </div>
+      </div>
+    </aside>
+    <main class="app-main">
+      <div class="page-scroll" id="scroll"><div class="page-content" id="page"><div class="p-8 muted" role="status">Loading your workspace…</div></div></div>
+      <div id="save-strip" class="save-strip" hidden></div>
+      <footer class="footer-strip" role="status" aria-live="polite"><span id="footer-dot" class="status status-xs"></span><span id="footer-text">Starting Codex Presence…</span></footer>
+    </main>
+  </div>
+  <dialog class="modal" id="decision"><div class="modal-box" id="decision-body"></div></dialog>
+  <div class="toast toast-end toast-bottom" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

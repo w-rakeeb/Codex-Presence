@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>Codex Presence</AssemblyName>
-    <Version>2.0.2</Version>
+    <Version>3.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <StartupObject>CodexPresence.Program</StartupObject>
@@ -20,5 +20,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\*.png;Assets\*.ico" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <Content Include="Web\dist\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="Web\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\LICENSE.txt" CopyToPublishDirectory="PreserveNewest" Link="Web\WebView2-LICENSE.txt" />
+    <Content Include="$(NuGetPackageRoot)microsoft.web.webview2\1.0.4258.31\NOTICE.txt" CopyToPublishDirectory="PreserveNewest" Link="Web\WebView2-NOTICE.txt" />
   </ItemGroup>
 </Project>

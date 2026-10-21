@@ -67,6 +67,7 @@ public partial class MainWindow
             if (page is "Privacy" or "Layout") foreach (var update in editorPreviewUpdates) update(backend.Snapshot);
         };
         presentationTimer.Start();
+        IsVisibleChanged += (_, _) => { if (IsVisible && !testMode) _ = EnsureWebInterface(); };
         AddHandler(ToggleButton.CheckedEvent, new RoutedEventHandler(AnimateToggle), true);
         AddHandler(ToggleButton.UncheckedEvent, new RoutedEventHandler(AnimateToggle), true);
         PreviewKeyDown += (_, e) =>
@@ -373,6 +374,7 @@ public partial class MainWindow
 
     private void ShowToast(string message)
     {
+        if (webReady) return;
         var layer = (Grid)MainContent.Parent;
         if (toast != null) layer.Children.Remove(toast);
         toast = Surface(Text(message, 13)); toast.Margin = new Thickness(24, 0, 24, 48); toast.HorizontalAlignment = HorizontalAlignment.Right; toast.VerticalAlignment = VerticalAlignment.Bottom;

@@ -10,7 +10,7 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        var testing = Array.IndexOf(args, "--self-test") >= 0 || Array.IndexOf(args, "--interactive-test") >= 0;
+        var testing = Array.IndexOf(args, "--self-test") >= 0 || Array.IndexOf(args, "--interactive-test") >= 0 || Array.IndexOf(args, "--web-test") >= 0;
         using var mutex = new Mutex(true, testing ? "Local\\CodexPresenceDesktopVerification" : "Local\\CodexPresenceDesktop", out var owner);
         var exiting = Array.IndexOf(args, "--exit") >= 0;
         if (exiting && owner) return 0;

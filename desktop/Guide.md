@@ -1,14 +1,14 @@
 # Codex Presence — A to Z
 
-## Desktop 2.0.2 interface
+## Desktop 3.0 interface
 
-Overview shows engine status, the exact saved Discord text and usage tiles. The primary action is Start engine, Pause or Resume; background and Exit are in the overflow menu. Layout keeps the saved preview pinned while controls scroll. Settings groups are Appearance, Behavior, Startup and Advanced.
+The sidebar opens Overview, Privacy, Layout, Settings and Tools. Overview pairs engine controls with the exact Discord preview, four usage metrics and a token breakdown. Privacy and Layout place saved output beside the controls on wide windows and above them on small windows. Settings groups are Appearance, Behavior, Startup and Advanced, with a search for the current section.
 
-The native interface uses daisyUI-inspired component patterns: joined usage statistics, bordered tabs, grouped settings, quiet secondary actions and a sticky Save/Reload area. No browser runtime is required.
+This version uses actual daisyUI 5 and Tailwind CSS 4 in a local WebView2 interface hosted by the existing Windows app. All styles, scripts, icons and notices are bundled; the interface needs no internet connection. Microsoft Edge WebView2 Runtime is required for the new interface. If it cannot start, the native dashboard remains available with recovery instructions. The background watcher creates no browser until you open the dashboard.
 
 Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
 
-Right-click a stat value to copy its full number. Arrow keys move between focused navigation tabs; Ctrl+1 through Ctrl+5 select a tab, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete visual design and QA limits are in `docs/desktop-design.md` in the source checkout.
+Right-click a stat value to copy its full number, or use Copy tokens. Up/Down move between focused sidebar items; Ctrl+1 through Ctrl+5 open a page, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete design and QA limits are in `docs/desktop-design-v3.md` in the source checkout.
 
 ## Open and start
 

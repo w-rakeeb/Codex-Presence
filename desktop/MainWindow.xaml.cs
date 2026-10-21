@@ -184,11 +184,13 @@ public partial class MainWindow : Window
         else if (args.Contains("--startup") || (!testMode && backend.Options.StartInBackground)) await RunInBackground();
         else { ShowDashboard(); if (!testMode && backend.Options.StartEngineOnOpen) await StartEngine(); }
         if (args.Contains("--self-test")) await SelfTest();
+        if (args.Contains("--web-test")) { await EnsureWebInterface(); await VerifyWebInterface(); }
         if (args.Contains("--interactive-test"))
         {
             var local = backend.Config!.DeepClone().AsObject(); local["presence_enabled"] = false; await backend.SaveConfig(local);
             await StartEngine(); Title = "Codex Presence — Verification"; Navigate("Settings");
         }
+        if (args.Contains("--web-interactive")) await EnsureWebInterface();
         if (args.Contains("--verify-live") || args.Contains("--verify-background")) await VerifyLive();
         if (startupWarning != null) { Footer.Text = startupWarning; ShowDashboard(); }
     }

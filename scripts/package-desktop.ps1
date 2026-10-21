@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string] $AppRoot, [string] $Version = '2.0.2', [string] $OutputDirectory)
+param([Parameter(Mandatory)][string] $AppRoot, [string] $Version = '3.0.0', [string] $OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $taskProject = Split-Path -Parent $PSScriptRoot
 if (-not [IO.Path]::IsPathFullyQualified($AppRoot)) { throw 'AppRoot must be absolute.' }
@@ -8,12 +8,13 @@ $taskOutput = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) }
 $taskPackage = Join-Path $taskOutput ('Codex-Presence-' + $Version + '-windows-x64')
 if (Test-Path -LiteralPath $taskPackage) { throw 'The package folder already exists. Choose a new output directory.' }
 New-Item -ItemType Directory -Path $taskPackage -Force | Out-Null
-foreach ($taskName in @('Codex Presence.exe', 'Guide.md', 'LICENSE.txt')) {
+foreach ($taskName in @('Codex Presence.exe', 'Guide.md', 'LICENSE.txt', 'WebView2Loader.dll')) {
     $taskFile = Join-Path $taskApp $taskName
     if (-not (Test-Path -LiteralPath $taskFile -PathType Leaf)) { throw ('Missing package file: ' + $taskName) }
     Copy-Item -LiteralPath $taskFile -Destination $taskPackage
 }
 Copy-Item -LiteralPath (Join-Path $taskApp 'Runtime') -Destination (Join-Path $taskPackage 'Runtime') -Recurse
+Copy-Item -LiteralPath (Join-Path $taskApp 'Web') -Destination (Join-Path $taskPackage 'Web') -Recurse
 Copy-Item -LiteralPath (Join-Path $taskProject 'desktop\Assets') -Destination $taskPackage -Recurse
 Copy-Item -LiteralPath (Join-Path $taskProject 'NOTICE.md') -Destination $taskPackage
 $taskPaths = Get-ChildItem -LiteralPath $taskPackage -File -Recurse | Sort-Object FullName

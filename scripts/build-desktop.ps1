@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch] $SkipEngine, [string] $OutputDirectory)
+param([switch] $SkipEngine, [string] $OutputDirectory, [string] $EngineDirectory)
 $ErrorActionPreference = "Stop"
 $taskProject = Split-Path -Parent $PSScriptRoot
 $taskOutput = Join-Path $taskProject '.build\desktop'
@@ -18,13 +18,23 @@ if (-not $SkipEngine) {
 }
 $taskRuntime = Join-Path $taskOutput 'Runtime'
 New-Item -ItemType Directory -Path $taskRuntime -Force | Out-Null
-Get-ChildItem -LiteralPath (Join-Path $taskProject 'releases\windows') -File | Copy-Item -Destination $taskRuntime
-$taskIcon = Get-ChildItem -LiteralPath (Join-Path $taskProject '.build\target') -Filter 'codex-app.ico' -Recurse -File | Select-Object -First 1
-if ($null -eq $taskIcon) { throw 'Build the engine first to generate its application icon.' }
-Copy-Item -LiteralPath $taskIcon.FullName -Destination (Join-Path $taskProject 'desktop\app.ico')
+if ($EngineDirectory -and -not $SkipEngine) { throw 'EngineDirectory is only supported with SkipEngine.' }
+$taskEngines = if ($EngineDirectory) { [IO.Path]::GetFullPath($EngineDirectory) } else { Join-Path $taskProject 'releases\windows' }
+Get-ChildItem -LiteralPath $taskEngines -File | Copy-Item -Destination $taskRuntime
+$taskIconCache = Join-Path $taskProject '.build\target'
+$taskIcon = if (Test-Path -LiteralPath $taskIconCache) { Get-ChildItem -LiteralPath $taskIconCache -Filter 'codex-app.ico' -Recurse -File | Select-Object -First 1 } else { $null }
+if ($null -ne $taskIcon) { Copy-Item -LiteralPath $taskIcon.FullName -Destination (Join-Path $taskProject 'desktop\app.ico') }
 $taskDesktopIcon = Join-Path $taskProject 'desktop\Assets\app.ico'
 Copy-Item -LiteralPath $taskDesktopIcon -Destination (Join-Path $taskRuntime 'app.ico')
 Copy-Item -LiteralPath (Join-Path $taskProject 'desktop\Assets') -Destination $taskOutput -Recurse -Force
+Push-Location (Join-Path $taskProject 'desktop\Web')
+try {
+    & npm.cmd ci --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw 'Interface dependencies could not be restored.' }
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'Interface build failed.' }
+}
+finally { Pop-Location }
 dotnet publish (Join-Path $taskProject 'desktop\CodexPresence.csproj') -c Release -o $taskOutput --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed.' }
 Copy-Item -LiteralPath (Join-Path $taskProject 'LICENSE') -Destination (Join-Path $taskOutput 'LICENSE.txt')

@@ -15,6 +15,7 @@ public sealed class WindowPresentationState
     public double? Top { get; set; }
     public string LastTab { get; set; } = "Overview";
     public string ThemeMode { get; set; } = "inherit";
+    public int InterfaceRevision { get; set; }
     private static readonly SemaphoreSlim writes = new(1, 1);
     public static WindowPresentationState Load(string root)
     {

@@ -1,5 +1,15 @@
 # Desktop release notes
 
+## 3.0.0
+
+- Replace the top-tab interface with a local daisyUI 5 / Tailwind CSS 4 workspace hosted in WebView2. Add a full sidebar that becomes an icon rail on smaller windows.
+- Rebuild Overview with paired status/preview cards, current session information, four large statistics, a token breakdown and retained session/quota details.
+- Reorganize Privacy and Layout into form panels with a saved-output preview rail. On narrow windows, show the preview before the controls.
+- Add section search, clearer toggle rows, visible input feedback and a persistent Save/Reload strip. Keep retained drafts and the existing manual-save contract.
+- Keep all five styles, four palettes, System/Dark/Light, tray/background behavior and original engine actions. The native dashboard is the fallback if WebView2 cannot initialize.
+- Load no browser during hidden startup. Bundle the complete interface and licenses locally; prevent external navigation, downloads and permission requests from reaching the desktop bridge.
+- Preserve the Rust binary, outgoing Discord text, configuration schema, original MIT credit and the independent old-design installation.
+
 ## 2.0.2
 
 - Apply the daisyUI skill's card, fieldset, bordered-tab, button, toggle and stats patterns through native WPF components. No web runtime or UI dependency is added.
