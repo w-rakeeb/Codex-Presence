@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-10-22
+
+### Fixed
+
+- Omit empty optional Discord fields, including a blank manual second line.
+- Validate Windows Discord handshakes and publication acknowledgments. Drain responses and bound named-pipe operations with overlapped I/O to prevent false Connected status and stalled updates.
+
+
 ## [1.12.0] - 2026-10-21
 
 ### Added

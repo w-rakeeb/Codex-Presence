@@ -3,6 +3,8 @@ pub mod cli;
 pub mod config;
 pub mod cost;
 pub mod discord;
+#[cfg(windows)]
+mod discord_transport;
 pub mod manual;
 pub mod metrics;
 pub mod model;

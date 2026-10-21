@@ -1,6 +1,9 @@
+#[cfg(windows)]
+use crate::discord_transport::DiscordIpcClient;
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
+#[cfg(not(windows))]
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1100,10 +1103,13 @@ struct ActivitySpec<'a> {
 }
 
 fn build_activity(spec: ActivitySpec<'_>) -> Activity<'_> {
-    let mut activity = Activity::new()
-        .name(spec.name)
-        .details(spec.details)
-        .state(spec.state);
+    let mut activity = Activity::new().name(spec.name);
+    if !spec.details.is_empty() {
+        activity = activity.details(spec.details);
+    }
+    if !spec.state.is_empty() {
+        activity = activity.state(spec.state);
+    }
     if let Some(start) = spec.start_epoch {
         activity = activity.timestamps(Timestamps::new().start(start));
     }
@@ -3435,6 +3441,28 @@ mod manual_payload_tests {
         assert_eq!(value["state"], "Model · High");
         assert_eq!(value["timestamps"]["start"], 100);
         assert_eq!(value["timestamps"]["end"], 300);
+    }
+
+    #[test]
+    fn optional_empty_manual_line_is_absent_from_discord_payload() {
+        let config = PresenceConfig::default();
+        let session = ManualSession {
+            profile: ManualProfile {
+                details: "Thinking · My project".into(),
+                state: String::new(),
+                timestamp_mode: "session".into(),
+                start_epoch: None,
+                end_epoch: None,
+            },
+            started_at: 100,
+            updated_at: 100,
+        };
+        let preview = manual_presence_presentation(&session, &config);
+        let value =
+            serde_json::to_value(build_manual_activity(&preview, Some(100), None, None)).unwrap();
+        assert!(value.get("state").is_none());
+        assert_eq!(value["details"], "Thinking · My project");
+        assert_eq!(preview.state, "");
     }
 
     #[test]

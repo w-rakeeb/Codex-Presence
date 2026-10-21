@@ -1,3 +1,7 @@
+# Codex Presence 3.1.1
+
+Manual presence now supports an empty optional second line. Windows connection status is based on Discord accepting the activity; rejected payloads and timeouts are reported and reconnect automatically.
+
 # Codex Presence 3.1
 
 The sidebar includes **Manual presence** for a custom activity and timeline. Enter an activity/project line and an optional second line. Choose connection time, last manual update, manual-session start, local clock, or custom timestamps. Custom times use your PC's local time; an optional future End creates a countdown. Save profile keeps these fields without publishing. Start or apply explicitly enables manual mode; Use automatic presence restores real session text. Pause, privacy mode and app priority still apply. Manual mode never resumes automatically on a new engine/app start. Manual profiles live separately in Data/manual-presence.json.

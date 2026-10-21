@@ -63,8 +63,14 @@ public partial class MainWindow
             Check(File.ReadAllText(backend.ConfigPath) != configBefore, "Browser Save reaches existing atomic configuration writer");
             await Page("Layout");
             Check(await Script("document.querySelectorAll('.preview-rail [data-preview]').length === 3") == "true", "Editor preview exposes all three exact engine text strings");
-            var expectedPreview = new[] { "app_name", "details", "state" }.Select(key => S(backend.Snapshot?["preview"]?[key], "")).ToArray();
-            Check(JsonSerializer.Deserialize<string[]>(await Script("[...document.querySelectorAll('.preview-rail [data-preview]')].map(item => item.textContent)"))!.SequenceEqual(expectedPreview), "Browser preview text matches the engine byte for byte");
+            var previewMatches = false;
+            await Wait(async () =>
+            {
+                var expectedPreview = new[] { "app_name", "details", "state" }.Select(key => S(backend.Snapshot?["preview"]?[key], "")).ToArray();
+                previewMatches = JsonSerializer.Deserialize<string[]>(await Script("[...document.querySelectorAll('.preview-rail [data-preview]')].map(item => item.textContent)"))!.SequenceEqual(expectedPreview);
+                return previewMatches;
+            });
+            Check(previewMatches, "Browser preview text matches the engine byte for byte");
             await Script("{const input = document.querySelector('input[aria-label=\"Custom text\"]'); input.focus(); input.value = 'Focus check'; input.dispatchEvent(new Event('input', {bubbles:true})); input.setSelectionRange(4,4); window.focusProbe = input;}");
             await Task.Delay(1200);
             Check(await Script("document.activeElement === window.focusProbe && window.focusProbe.selectionStart === 4 && window.focusProbe.value === 'Focus check'") == "true", "Live updates preserve the focused input, text and caret");

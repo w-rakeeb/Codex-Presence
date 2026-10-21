@@ -1,5 +1,12 @@
 # Desktop release notes
 
+## 3.1.1
+
+- Fix manual presence with an empty optional second line. Omit empty optional Discord text fields instead of sending rejected empty strings; visible text stays unchanged.
+- Wait for Discord to acknowledge every Windows publication and clear. Reject server errors and invalid handshakes, handle ping frames and drain replies so they cannot fill the pipe and stall the engine.
+- Bound Windows IPC reads and writes with overlapped I/O and cancellation. Preserve reconnect backoff and publication throttling.
+- Stabilize the browser preview regression check by waiting for the saved configuration to reach the engine and interface before comparing exact text.
+
 ## 3.1.0
 
 - Correct resize corners by retaining an 8px native resize gutter around the browser. Collapse the unused native layout and defer snapshot refresh, motion and geometry writes during a resize drag. Keep maximized content inside the current monitor working area, above the taskbar.
