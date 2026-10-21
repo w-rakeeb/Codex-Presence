@@ -345,7 +345,7 @@ public partial class MainWindow
 
     private JsonNode? ActiveContext(JsonObject? snapshot)
     {
-        var context = snapshot?["sessions"]?.AsArray().FirstOrDefault(session => S(session?["session_id"]) == S(snapshot?["active_session_id"]))?["context_window"];
+        var context = (snapshot?["manual_session"] ?? snapshot?["sessions"]?.AsArray().FirstOrDefault(session => S(session?["session_id"]) == S(snapshot?["active_session_id"])))?["context_window"];
         return Number(context?["remaining_percent"]) is { } remaining ? JsonValue.Create(Math.Clamp(100 - remaining, 0, 100)) : null;
     }
 

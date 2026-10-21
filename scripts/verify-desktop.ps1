@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch] $CrossVolume, [switch] $Profile, [string] $AppRoot)
+param([switch] $CrossVolume, [switch] $Profile, [string] $AppRoot, [ValidateRange(30,600)][int] $TimeoutSeconds = 300)
 $ErrorActionPreference = 'Stop'
 $taskProject = Split-Path -Parent $PSScriptRoot
 $taskRoot = Join-Path $taskProject '.build\desktop'
@@ -29,7 +29,7 @@ if ($Profile) { $taskStart.ArgumentList.Add('--profile-quality') }
 $taskStart.ArgumentList.Add('--test-home')
 $taskStart.ArgumentList.Add($taskHome)
 $taskProcess = [Diagnostics.Process]::Start($taskStart)
-if (-not $taskProcess.WaitForExit(90000)) { throw 'Desktop verification did not finish within 90 seconds; inspect its window.' }
+if (-not $taskProcess.WaitForExit($TimeoutSeconds * 1000)) { throw "Desktop verification did not finish within $TimeoutSeconds seconds; inspect its window." }
 if ($taskProcess.ExitCode -ne 0) { throw (Get-Content (Join-Path $taskEvidence 'failure.txt') -Raw) }
 $taskResult = Get-Content (Join-Path $taskEvidence 'results.json') -Raw | ConvertFrom-Json
 $taskResultPath = Join-Path $taskEvidence $(if ($CrossVolume) { 'results-cross-volume.json' } else { 'results-same-volume.json' })

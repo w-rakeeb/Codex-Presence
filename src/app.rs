@@ -823,12 +823,51 @@ pub fn run_desktop_bridge(
     let mut metrics_tracker = MetricsTracker::new();
     let mut plan_detector = PlanDetector::new();
     let sessions_roots = config::sessions_paths();
+    let mut manual_selected: Option<CodexSessionSnapshot> = None;
     while !stop.load(Ordering::Relaxed) {
         reload_runtime_config(&mut config);
+        let snapshot = collect_runtime_snapshot(
+            &sessions_roots,
+            &runtime,
+            &config,
+            &mut git_cache,
+            &mut parse_cache,
+            &mut metrics_tracker,
+            &mut plan_detector,
+        )?;
+        let mut recent_sessions = parse_cache.recent_manual_sessions();
+        if config.display.use_chat_title {
+            parse_cache.apply_chat_titles(&mut recent_sessions);
+        }
         for command in manual_receiver.try_iter() {
             manual_revision = manual_revision.saturating_add(1);
             match command {
                 Ok(Some(profile)) => {
+                    let selected = if profile.source == "recent" {
+                        let id = profile
+                            .session_id
+                            .as_deref()
+                            .filter(|id| !id.is_empty())
+                            .or_else(|| {
+                                recent_sessions
+                                    .first()
+                                    .map(|session| session.session_id.as_str())
+                            });
+                        let selected = id.and_then(|id| {
+                            parse_cache.manual_session(id, &mut git_cache, &config.pricing)
+                        });
+                        if selected.is_none() {
+                            manual_error = Some(
+                                "This session is no longer available. Choose another recent chat."
+                                    .into(),
+                            );
+                            continue;
+                        }
+                        selected
+                    } else {
+                        None
+                    };
+                    manual_selected = selected;
                     let now = Utc::now().timestamp();
                     let started_at = manual.as_ref().map_or(now, |value| value.started_at);
                     manual = Some(crate::manual::ManualSession {
@@ -839,21 +878,46 @@ pub fn run_desktop_bridge(
                     manual_error = None;
                 }
                 Ok(None) => {
+                    manual_selected = None;
                     manual = None;
                     manual_error = None;
                 }
                 Err(error) => manual_error = Some(error),
             }
         }
-        let snapshot = collect_runtime_snapshot(
-            &sessions_roots,
-            &runtime,
-            &config,
-            &mut git_cache,
-            &mut parse_cache,
-            &mut metrics_tracker,
-            &mut plan_detector,
-        )?;
+        if let Some(selected) = &manual_selected
+            && let Some(updated) =
+                parse_cache.manual_session(&selected.session_id, &mut git_cache, &config.pricing)
+        {
+            manual_selected = Some(updated);
+        }
+        if config.display.use_chat_title
+            && let Some(selected) = &mut manual_selected
+        {
+            parse_cache.apply_chat_titles(std::slice::from_mut(selected));
+        }
+        let manual_preview = manual.as_ref().map(|session| {
+            if let Some(selected) = &manual_selected {
+                let mut tier = snapshot.resolved_service_tier.clone();
+                if selected.speed.known {
+                    tier.tier = match selected.speed.mode {
+                        SpeedMode::Fast => ServiceTier::Fast,
+                        SpeedMode::Standard => ServiceTier::Standard,
+                    };
+                }
+                crate::discord::active_presence_presentation_with_credits(
+                    PresenceSurface::Desktop,
+                    selected,
+                    snapshot.effective_limits(),
+                    snapshot.effective_credits(),
+                    &snapshot.resolved_plan,
+                    &tier,
+                    &config,
+                )
+            } else {
+                crate::discord::manual_presence_presentation(session, &config)
+            }
+        });
         let priority_held = priority.load(Ordering::Relaxed);
         let waiting_for_real_work = startup_gate.observe(
             snapshot
@@ -867,9 +931,10 @@ pub fn run_desktop_bridge(
             discord.idle_timeout_remaining_at(active, &config, Utc::now().timestamp());
         let idle_hidden = manual.is_none() && idle_remaining == Some(0);
         if !observe {
-            if let Some(session) = &manual {
+            if let (Some(session), Some(presentation)) = (&manual, &manual_preview) {
                 if let Err(error) = discord.update_manual(
                     session,
+                    presentation,
                     &config,
                     config.presence_enabled && !priority_held,
                 ) {
@@ -900,8 +965,8 @@ pub fn run_desktop_bridge(
                 .and_then(CodexSessionSnapshot::detected_surface)
                 .unwrap_or(PresenceSurface::Desktop)
         };
-        let preview = if let Some(session) = &manual {
-            crate::discord::manual_presence_presentation(session, &config)
+        let preview = if let Some(presentation) = manual_preview {
+            presentation
         } else {
             match active {
                 Some(session) => crate::discord::active_presence_presentation_with_credits(
@@ -922,6 +987,11 @@ pub fn run_desktop_bridge(
         let value = serde_json::json!({
             "schema_version": 1,
             "manual_mode": manual.is_some(),
+            "manual_session": manual_selected,
+            "recent_sessions": recent_sessions.iter().map(|session| serde_json::json!({
+                "session_id": session.session_id, "project_name": session.project_name,
+                "model": session.model, "last_activity": session.last_activity,
+            })).collect::<Vec<_>>(),
             "manual_revision": manual_revision,
             "manual_error": manual_error,
             "manual_updated_at": manual.as_ref().map(|value| value.updated_at),

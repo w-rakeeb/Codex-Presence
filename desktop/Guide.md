@@ -1,4 +1,4 @@
-# Codex Presence 3.1.1
+# Codex Presence 3.2.0
 
 Manual presence now supports an empty optional second line. Windows connection status is based on Discord accepting the activity; rejected payloads and timeouts are reported and reconnect automatically.
 
@@ -19,6 +19,14 @@ This version uses actual daisyUI 5 and Tailwind CSS 4 in a local WebView2 interf
 Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
 
 Right-click a stat value to copy its full number, or use Copy tokens. Up/Down move between focused sidebar items; Ctrl+1 through Ctrl+5 open a page, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete design and QA limits are in `docs/desktop-design-v3.md` in the source checkout.
+
+## Reuse a recent Codex chat in Manual presence
+
+Open **Manual → Presence source → Recent Codex session**. Choose a recent chat or project, choose your timeline, then select **Start or apply manual presence**. The most recent chat appears first. The engine loads the selected chat's full details, including older inactive chats, and uses the same formatter, Layout and Privacy settings as automatic presence. Model, effort, tokens, context and enabled fields are not invented or retyped.
+
+The selected chat stays selected when you work in another chat. Its details update while its session file remains available; if that file disappears during this manual session, its last known details remain until you choose another chat or automatic mode. The preview shows the exact outgoing text. This changes the manual timer only as selected; Pause and app priority still apply.
+
+**Custom text** remains available and your saved text is preserved when you switch sources. Saved profiles do not publish automatically after restarting the app. The recent picker shows up to 30 locally available chats; use **Load Codex sessions** if the engine is stopped.
 
 ## Open and start
 

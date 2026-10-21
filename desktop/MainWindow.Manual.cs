@@ -14,6 +14,7 @@ public partial class MainWindow
 {
     private JsonObject? manualProfile;
     private bool manualProfileUnsaved;
+    private Action? refreshManualSessions;
     private string ManualProfilePath => testMode ? Path.Combine(backend.Options.CodexHome, "manual-presence.json") : Path.Combine(root, "Data", "manual-presence.json");
 
     private JsonObject LoadManualProfile()
@@ -54,7 +55,11 @@ public partial class MainWindow
     {
         var profile = LoadManualProfile();
         var details = S(profile["details"], "").Trim(); var state = S(profile["state"], "").Trim();
-        if (details.Length == 0 || details.Length > 128 || state.Length > 128 || details.Concat(state).Any(char.IsControl)) throw new IOException("Enter an activity line and use at most 128 characters per line, without line breaks.");
+        var source = S(profile["source"], "custom");
+        if (source != "custom" && source != "recent") throw new IOException("Choose a presence source.");
+        if (source == "custom" && (details.Length == 0 || details.Length > 128 || state.Length > 128 || details.Concat(state).Any(char.IsControl))) throw new IOException("Enter an activity line and use at most 128 characters per line, without line breaks.");
+        if (source == "recent" && backend.Snapshot?["recent_sessions"]?.AsArray().Count is not > 0) throw new IOException("Start the engine and open a Codex chat first, then choose a recent session.");
+        if (source == "recent" && S(profile["session_id"], "").Length == 0) profile["session_id"] = S(backend.Snapshot?["recent_sessions"]?.AsArray().FirstOrDefault()?["session_id"], "");
         var mode = S(profile["timestamp_mode"], "session");
         if (!new[] { "connection", "update", "session", "local", "custom" }.Contains(mode)) throw new IOException("Choose a timestamp option.");
         long? ParseTime(string key)
@@ -72,7 +77,7 @@ public partial class MainWindow
             if (start is null or <= 0 || start > now) throw new IOException("Choose a start time in the past or present.");
             if (end != null && (end <= start || end <= now)) throw new IOException("Choose an end time later than the start time and now, or leave End empty.");
         }
-        return new JsonObject { ["details"] = details, ["state"] = state, ["timestamp_mode"] = mode, ["start_epoch"] = start, ["end_epoch"] = end };
+        return new JsonObject { ["source"] = source, ["session_id"] = S(profile["session_id"], ""), ["details"] = details, ["state"] = state, ["timestamp_mode"] = mode, ["start_epoch"] = start, ["end_epoch"] = end };
     }
 
     private async Task ApplyManualPresence()
@@ -86,9 +91,54 @@ public partial class MainWindow
 
     private void RenderManual()
     {
-        Heading("Manual presence", "Set your own activity and timeline. Automatic monitoring resumes when you switch back.");
+        Heading("Manual presence", "Choose a recent Codex chat or custom text, then set your timeline.");
         var profile = LoadManualProfile();
+        var sourceCard = Card("Presence source", "Use the same fields as automatic presence, or write your own text. Choose a chat, then Apply to publish it with your timeline.");
+        var sourceChoice = new ComboBox { ItemsSource = new[] { "Custom text", "Recent Codex session" }, SelectedIndex = S(profile["source"], "custom") == "recent" ? 1 : 0, Margin = new Thickness(0, 0, 0, 12) };
+        AutomationProperties.SetName(sourceChoice, "Presence source");
+        sourceCard.Children.Add(sourceChoice);
+        sourceCard.Children.Add(Text("Recent chat or project", 13));
+        var sessionChoice = new ComboBox { Margin = new Thickness(0, 0, 0, 12) };
+        AutomationProperties.SetName(sessionChoice, "Recent Codex session");
+        sourceCard.Children.Add(sessionChoice);
+        var sessionHelp = Text("", 13);
+        sourceCard.Children.Add(sessionHelp);
+        var startEngine = AsyncButton("Load Codex sessions", StartEngine);
+        sourceCard.Children.Add(startEngine);
+        var sessionIds = Array.Empty<string>();
+        var refreshing = false;
+        var choicesSignature = "";
+        sessionChoice.SelectionChanged += (_, _) =>
+        {
+            if (!refreshing && sessionChoice.SelectedIndex >= 0 && sessionChoice.SelectedIndex < sessionIds.Length)
+            {
+                profile["session_id"] = sessionIds[sessionChoice.SelectedIndex];
+                manualProfileUnsaved = true;
+            }
+        };
         var content = Card("Presence text", "This mode uses your chosen Discord application and artwork. Privacy mode and Pause still apply.");
+        refreshManualSessions = () =>
+        {
+            var sessions = backend.Snapshot?["recent_sessions"]?.AsArray();
+            var signature = sessions?.ToJsonString() ?? "";
+            if (signature != choicesSignature && !sessionChoice.IsDropDownOpen && !sessionChoice.IsKeyboardFocusWithin)
+            {
+                refreshing = true;
+                var chosen = S(profile["session_id"], "");
+                sessionIds = sessions?.Select(session => S(session?["session_id"], "")).ToArray() ?? Array.Empty<string>();
+                var labels = sessions?.Select((session, index) => (index == 0 ? "Most recent · " : "") + S(session?["project_name"], "Untitled chat") + " · " + S(session?["session_id"], "")[..Math.Min(8, S(session?["session_id"], "").Length)]).ToArray() ?? Array.Empty<string>();
+                sessionChoice.ItemsSource = labels;
+                sessionChoice.SelectedIndex = chosen.Length == 0 ? (sessionIds.Length > 0 ? 0 : -1) : Array.IndexOf(sessionIds, chosen);
+                refreshing = false;
+                choicesSignature = signature;
+            }
+            sessionChoice.IsEnabled = sourceChoice.SelectedIndex == 1 && sessionIds.Length > 0;
+            if (content.Parent is FrameworkElement textCard) textCard.Visibility = sourceChoice.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            startEngine.Visibility = backend.Running ? Visibility.Collapsed : Visibility.Visible;
+            sessionHelp.Text = sessionIds.Length == 0 ? "Start the engine to load your recent Codex chats. If none appear, open a chat in Codex first." : sessionChoice.SelectedIndex < 0 ? "The saved chat is no longer in the recent list. Choose another chat." : "Uses the selected chat's activity, model, effort, tokens and context. Layout and Privacy settings still apply. This selection stays on that chat when you work elsewhere.";
+        };
+        sourceChoice.SelectionChanged += (_, _) => { profile["source"] = sourceChoice.SelectedIndex == 1 ? "recent" : "custom"; manualProfileUnsaved = true; refreshManualSessions(); };
+        sessionChoice.SelectionChanged += (_, _) => { if (!refreshing) refreshManualSessions(); };
         TextBox Field(Panel panel, string title, string key, int maximum = 128)
         {
             panel.Children.Add(Text(title, 13));
@@ -116,5 +166,6 @@ public partial class MainWindow
         apply.Style = (Style)FindResource("PrimaryButton");
         actions.Children.Add(apply);
         actions.Children.Add(AsyncButton("Use automatic presence", async () => { if (backend.Running) await backend.SetManualPresence(null); Footer.Text = "Automatic presence selected."; }));
+        refreshManualSessions();
     }
 }

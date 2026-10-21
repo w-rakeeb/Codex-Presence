@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManualProfile {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub details: String,
     pub state: String,
     pub timestamp_mode: String,
@@ -13,14 +17,26 @@ pub struct ManualProfile {
 
 impl ManualProfile {
     pub fn validate(&self, now: i64) -> Result<(), String> {
-        if self.details.trim().is_empty()
-            || self.details.chars().count() > 128
-            || self.state.chars().count() > 128
-            || self
-                .details
-                .chars()
-                .chain(self.state.chars())
-                .any(char::is_control)
+        if !matches!(self.source.as_str(), "" | "custom" | "recent") {
+            return Err("Choose custom text or a recent Codex session.".into());
+        }
+        if self.source == "recent"
+            && self
+                .session_id
+                .as_ref()
+                .is_some_and(|id| id.len() > 256 || id.chars().any(char::is_control))
+        {
+            return Err("Choose a valid recent session.".into());
+        }
+        if self.source != "recent"
+            && (self.details.trim().is_empty()
+                || self.details.chars().count() > 128
+                || self.state.chars().count() > 128
+                || self
+                    .details
+                    .chars()
+                    .chain(self.state.chars())
+                    .any(char::is_control))
         {
             return Err("Use a nonempty activity line and at most 128 characters per line, without line breaks.".into());
         }
@@ -81,6 +97,8 @@ mod tests {
     use super::*;
     fn profile(mode: &str) -> ManualProfile {
         ManualProfile {
+            source: String::new(),
+            session_id: None,
             details: "Thinking · Project".into(),
             state: "GPT model · High".into(),
             timestamp_mode: mode.into(),
@@ -88,6 +106,21 @@ mod tests {
             end_epoch: None,
         }
     }
+    #[test]
+    fn legacy_profiles_remain_custom_and_recent_requires_a_valid_source() {
+        let legacy = serde_json::json!({ "details": "Existing text", "state": "", "timestamp_mode": "session", "start_epoch": null, "end_epoch": null });
+        let mut value: ManualProfile = serde_json::from_value(legacy).unwrap();
+        assert_eq!(value.source, "");
+        assert!(value.validate(200).is_ok());
+        value.source = "recent".into();
+        value.details.clear();
+        assert!(value.validate(200).is_ok());
+        value.session_id = Some("invalid\nidentifier".into());
+        assert!(value.validate(200).is_err());
+        value.source = "unknown".into();
+        assert!(value.validate(200).is_err());
+    }
+
     #[test]
     fn validates_text_and_timer_boundaries() {
         assert!(profile("custom").validate(200).is_ok());

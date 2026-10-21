@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-22
+
+### Added
+
+- Manual presence can select a recent Codex chat and reuse the exact automatic compositor, including model, effort, token/context usage, privacy, layout and artwork, with an independent manual timeline.
+- Load full inactive-session details on selection, keep that selection when another chat becomes active, and retain the last known snapshot if its source disappears during the manual session.
+- Preserve legacy custom-text profiles and the silent-startup gate. The recent picker is bounded to 30 local chats and uses the existing parse cache.
+
 ## [1.12.1] - 2026-10-22
 
 ### Fixed

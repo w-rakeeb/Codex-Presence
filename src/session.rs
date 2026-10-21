@@ -175,6 +175,53 @@ pub struct SessionParseCache {
 }
 
 impl SessionParseCache {
+    pub fn recent_manual_sessions(&self) -> Vec<CodexSessionSnapshot> {
+        let mut sessions: Vec<_> = self
+            .entries
+            .values()
+            .filter_map(|entry| entry.snapshot.as_ref())
+            .chain(
+                self.inactive_usage
+                    .values()
+                    .filter_map(|entry| entry.snapshot.as_ref()),
+            )
+            .collect();
+        sessions.sort_by_key(|session| Reverse(session.last_activity));
+        let mut seen = HashSet::new();
+        sessions
+            .into_iter()
+            .filter(|session| seen.insert(&session.session_id))
+            .take(30)
+            .cloned()
+            .collect()
+    }
+
+    pub fn manual_session(
+        &mut self,
+        id: &str,
+        git_cache: &mut GitBranchCache,
+        pricing: &PricingConfig,
+    ) -> Option<CodexSessionSnapshot> {
+        let path = self
+            .entries
+            .values()
+            .filter_map(|entry| entry.snapshot.as_ref())
+            .chain(
+                self.inactive_usage
+                    .values()
+                    .filter_map(|entry| entry.snapshot.as_ref()),
+            )
+            .filter(|session| session.session_id == id)
+            .max_by_key(|session| session.last_activity)?
+            .source_file
+            .clone();
+        let metadata = std::fs::metadata(&path).ok()?;
+        let modified = metadata.modified().ok()?;
+        parse_session_file_cached(&path, &metadata, modified, git_cache, self, pricing)
+            .ok()
+            .flatten()
+    }
+
     pub fn apply_chat_titles(&mut self, sessions: &mut [CodexSessionSnapshot]) {
         self.titles.refresh(&crate::config::codex_home());
         for session in sessions {
@@ -662,6 +709,73 @@ mod tests {
     use chrono::Duration as ChronoDuration;
     use chrono::TimeZone;
     use tempfile::TempDir;
+
+    #[test]
+    fn recent_manual_selection_loads_full_inactive_session_without_activating_it() {
+        let folder = TempDir::new().unwrap();
+        let timestamp = Utc::now() - ChronoDuration::hours(3);
+        for (id, model) in [("older", "gpt-5.4"), ("newer", "gpt-6.1-sol")] {
+            let path = folder.path().join(format!("{id}.jsonl"));
+            let events = [
+                serde_json::json!({"type":"session_meta","timestamp":timestamp,"payload":{"id":id,"cwd":format!("/projects/{id}"),"originator":"codex_work_desktop"}}),
+                serde_json::json!({"type":"turn_context","timestamp":timestamp,"payload":{"model":model,"effort":"high"}}),
+                serde_json::json!({"type":"event_msg","timestamp":timestamp,"payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":8000,"output_tokens":1200,"total_tokens":9200},"last_token_usage":{"input_tokens":8000,"output_tokens":1200,"total_tokens":9200},"model_context_window":272000},"rate_limits":{"primary":{"used_percent":12,"window_minutes":300}}}}),
+            ];
+            std::fs::write(
+                &path,
+                events
+                    .iter()
+                    .map(|event| event.to_string() + "\n")
+                    .collect::<String>(),
+            )
+            .unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(
+                    SystemTime::now()
+                        - Duration::from_secs(if id == "older" { 10800 } else { 7200 }),
+                )
+                .unwrap();
+        }
+        let mut cache = SessionParseCache::default();
+        let mut git = GitBranchCache::new(Duration::from_secs(30));
+        let pricing = PricingConfig::default();
+        let active = collect_active_sessions(
+            folder.path(),
+            Duration::from_secs(90),
+            Duration::from_secs(3600),
+            &mut git,
+            &mut cache,
+            &pricing,
+        )
+        .unwrap();
+        assert!(active.is_empty());
+        assert_eq!(cache.recent_manual_sessions()[0].session_id, "newer");
+        let chosen = cache.manual_session("older", &mut git, &pricing).unwrap();
+        assert_eq!(chosen.session_id, "older");
+        assert_eq!(chosen.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(chosen.session_total_tokens, Some(9200));
+        assert!(chosen.context_window.is_some());
+        assert!(
+            cache
+                .manual_session("missing", &mut git, &pricing)
+                .is_none()
+        );
+        assert!(
+            collect_active_sessions(
+                folder.path(),
+                Duration::from_secs(90),
+                Duration::from_secs(3600),
+                &mut git,
+                &mut cache,
+                &pricing
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
 
     #[test]
     fn only_prompts_and_task_starts_unlock_startup_publication() {

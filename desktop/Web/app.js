@@ -33,7 +33,7 @@ const descriptions = {
   Layout: 'Make room for the details that matter.',
   Settings: 'Make Presence work the way you do.',
   Tools: 'Check your connection and keep things running.',
-  Manual: 'Set your own activity and timeline.'
+  Manual: 'Choose a recent Codex chat or custom text, then set your timeline.'
 };
 let current = null;
 let shape = '';
@@ -76,14 +76,16 @@ function manualTime(snapshot) {
   return `${hours ? `${hours}:` : ''}${hours ? String(minutes).padStart(2, '0') : minutes}:${String(remainder).padStart(2, '0')} ${end ? 'remaining' : 'elapsed'}`;
 }
 
+function snapshotSessionLabel(state) { return state.snapshot?.manual_session ? 'Selected manual session' : 'Current session'; }
+
 function engine(state) {
   const mode = state.visual;
-  const active = state.snapshot?.sessions?.find(item => item.session_id === state.snapshot?.active_session_id) || state.snapshot?.sessions?.[0];
+  const active = state.snapshot?.manual_session || state.snapshot?.sessions?.find(item => item.session_id === state.snapshot?.active_session_id) || state.snapshot?.sessions?.[0];
   const primary = !state.running ? 'Start engine' : state.publicationEnabled ? 'Pause presence' : 'Resume presence';
   return `<section class="card card-border bg-base-100"><div class="card-body engine-card">
     <div class="flex items-center justify-between"><div class="engine-icon">${icon('activity')}</div><span class="badge badge-sm badge-ghost"><span class="status status-xs ${toneClass(mode.tone)}"></span>${escape(mode.tone === 'Success' ? 'Connected' : state.running ? 'Monitoring' : 'Stopped')}</span></div>
     <div><h2>${escape(mode.headline)}</h2><p class="secondary text-sm mt-2 leading-relaxed">${escape(mode.detail)}</p></div>
-    ${active ? `<div class="border-l-2 border-base-content/15 pl-3 mt-1"><p class="text-xs muted mb-1">Current session</p><p class="text-sm font-medium truncate" title="${escape(active.project_name)}">${escape(active.project_name || 'Untitled session')}</p><p class="text-xs muted mt-1">${escape(active.model)} · ${escape(active.reasoning_effort || 'Default effort')}</p></div>` : ''}
+    ${active ? `<div class="border-l-2 border-base-content/15 pl-3 mt-1"><p class="text-xs muted mb-1">${snapshotSessionLabel(state)}</p><p class="text-sm font-medium truncate" title="${escape(active.project_name)}">${escape(active.project_name || 'Untitled session')}</p><p class="text-xs muted mt-1">${escape(active.model)} · ${escape(active.reasoning_effort || 'Default effort')}</p></div>` : ''}
     <div class="card-actions items-center mt-auto pt-3"><button class="btn btn-primary" data-command="engine-primary" title="${state.monitorOnly && state.running ? 'Publication is disabled in local-only monitoring' : primary}" ${state.busy || state.monitorOnly && state.running ? 'disabled' : ''}>${icon(!state.running || !state.publicationEnabled ? 'play' : 'pause')}${primary}</button>${state.running ? '<button class="btn btn-ghost" data-command="stop">Stop</button>' : ''}<button id="engine-more" class="btn btn-ghost btn-square ml-auto" popovertarget="engine-actions" aria-label="More engine actions" title="More engine actions">${icon('more')}</button></div>
   </div></section>`;
 }
@@ -95,7 +97,7 @@ function stat(title, value, detail, glyph, progress = null, exact = null) {
 function dashboard(state) {
   const snapshot = state.snapshot || {};
   const totals = snapshot.metrics?.totals || {};
-  const active = (snapshot.sessions || []).find(item => item.session_id === snapshot.active_session_id) || snapshot.sessions?.[0];
+  const active = snapshot.manual_session || (snapshot.sessions || []).find(item => item.session_id === snapshot.active_session_id) || snapshot.sessions?.[0];
   const cache = number(totals.cache_hit_ratio) === null ? null : totals.cache_hit_ratio * 100;
   const remaining = number(active?.context_window?.remaining_percent);
   const context = remaining === null ? null : 100 - remaining;
@@ -144,7 +146,7 @@ function structural(nodes) { return nodes.map(node => `${node.id}:${node.kind}:$
 
 function updateDashboard(state) {
   const snapshot = state.snapshot || {};
-  const active = snapshot.sessions?.find(item => item.session_id === snapshot.active_session_id) || snapshot.sessions?.[0];
+  const active = snapshot.manual_session || snapshot.sessions?.find(item => item.session_id === snapshot.active_session_id) || snapshot.sessions?.[0];
   const nextEngine = JSON.stringify([state.visual, state.running, state.publicationEnabled, state.busy, snapshot.preview, state.previewVisible, active?.project_name, active?.model, active?.reasoning_effort]);
   if (nextEngine !== engineShape && !$('#engine-actions').matches(':popover-open')) {
     $('#engine-region').innerHTML = engine(state) + preview(state);

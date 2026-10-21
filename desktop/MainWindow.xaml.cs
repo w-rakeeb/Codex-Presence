@@ -139,6 +139,7 @@ public partial class MainWindow : Window
             UpdateTrayPresentation(EnginePresentation(snapshot));
             if (tray.Visible) { var text = "Codex Presence · " + S(snapshot["discord_status"]); text = text.Substring(0, Math.Min(63, text.Length)); if (tray.Text != text) tray.Text = text; }
             if (IsVisible && !windowResizing && page == "Overview") refreshTimer.Start();
+            if (IsVisible && !windowResizing && page == "Manual") refreshManualSessions?.Invoke();
         });
         backend.Logged += line => Dispatcher.BeginInvoke(() =>
         {

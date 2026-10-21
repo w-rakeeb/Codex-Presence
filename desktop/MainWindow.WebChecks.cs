@@ -164,6 +164,19 @@ public partial class MainWindow
                 Check(File.ReadAllText(backend.ConfigPath) != "" && !File.ReadAllText(backend.ConfigPath).Contains("Manual fixture"), mode + " keeps manual settings out of shared runtime configuration");
                 if (mode == "custom") Check(N(backend.Snapshot?["manual_end_epoch"]) > N(backend.Snapshot?["manual_start_epoch"]), "Custom countdown retains distinct start and end timestamps");
             }
+            await Script("{const source=document.querySelector('select[aria-label=\"Presence source\"]'); source.selectedIndex=1; source.dispatchEvent(new Event('change',{bubbles:true}));}");
+            await Wait(() => Task.FromResult(S(LoadManualProfile()["source"]) == "recent"));
+            Check(await Script("document.querySelector('select[aria-label=\"Recent Codex session\"]').options.length > 0") == "true", "Manual mode lists recent Codex chats for selection");
+            await Script("{const session=document.querySelector('select[aria-label=\"Recent Codex session\"]'); session.selectedIndex=0; session.dispatchEvent(new Event('change',{bubbles:true}));}");
+            var selectedManualId = S(backend.Snapshot?["recent_sessions"]?.AsArray().FirstOrDefault()?["session_id"]);
+            var selectedRevision = N(backend.Snapshot?["manual_revision"]);
+            await Script("[...document.querySelectorAll('button[data-action]')].find(button=>button.textContent==='Start or apply manual presence').click()");
+            await Wait(() => Task.FromResult(!busy && N(backend.Snapshot?["manual_revision"]) > selectedRevision));
+            Check(B(backend.Snapshot?["manual_mode"]) && S(backend.Snapshot?["manual_session"]?["session_id"]) == selectedManualId, "Manual mode publishes the explicitly selected recent session");
+            Check(backend.Snapshot!["preview"]!.ToJsonString() == automaticPreview, "Recent-session manual preview exactly matches automatic model, effort, activity, usage and artwork");
+            Check(N(backend.Snapshot?["manual_end_epoch"]) > N(backend.Snapshot?["manual_start_epoch"]), "Recent-session presence retains the chosen custom countdown");
+            Check(S(LoadManualProfile()["details"]) == "Thinking · Manual fixture" && S(LoadManualProfile()["state"]) == "Model · High", "Selecting a recent session preserves the saved custom text");
+            await Capture("Manual-Recent-Session");
             Check(backend.WaitForNewWork, "Manual mode does not unlock the real-work startup gate");
             await backend.SetPriorityHold(true);
             await Wait(() => Task.FromResult(B(backend.Snapshot?["priority_held"])));

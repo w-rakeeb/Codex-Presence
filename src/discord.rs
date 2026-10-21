@@ -460,6 +460,7 @@ impl DiscordPresence {
     pub(crate) fn update_manual(
         &mut self,
         session: &crate::manual::ManualSession,
+        presentation: &PresencePresentation,
         config: &PresenceConfig,
         enabled: bool,
     ) -> Result<()> {
@@ -472,7 +473,6 @@ impl DiscordPresence {
             return Ok(());
         }
         self.refresh_asset_keys_if_needed();
-        let presentation = manual_presence_presentation(session, config);
         let (start, end) = self.manual_timestamps(session);
         let fingerprint = serde_json::to_string(&(
             start,
@@ -498,7 +498,7 @@ impl DiscordPresence {
             &presentation.large_image_key,
             self.known_asset_keys.as_ref(),
         );
-        let activity = build_manual_activity(&presentation, start, end, image.as_deref());
+        let activity = build_manual_activity(presentation, start, end, image.as_deref());
         if let Err(error) = self
             .client
             .as_mut()
@@ -1058,8 +1058,8 @@ fn build_manual_activity<'a>(
         start_epoch: None,
         large_image_key: image,
         large_text: Some(&presentation.large_text),
-        small_image_key: None,
-        small_text: None,
+        small_image_key: presentation.small_image_key.as_deref(),
+        small_text: presentation.small_text.as_deref(),
     });
     if start.is_some() || end.is_some() {
         let mut timestamps = Timestamps::new();
@@ -1808,6 +1808,63 @@ mod tests {
         let mut config = PresenceConfig::default();
         config.display.separate_usage_line = false;
         config
+    }
+
+    #[test]
+    fn recent_manual_activity_keeps_automatic_fields_assets_and_privacy_with_custom_time() {
+        for fast in [false, true] {
+            for private in [false, true] {
+                let mut config = custom_config();
+                config.privacy.enabled = private;
+                let mut session = sample_session();
+                session.speed = SessionSpeed {
+                    known: true,
+                    mode: if fast {
+                        crate::session::SpeedMode::Fast
+                    } else {
+                        crate::session::SpeedMode::Standard
+                    },
+                    ..Default::default()
+                };
+                let tier = ResolvedServiceTier {
+                    tier: if fast {
+                        ServiceTier::Fast
+                    } else {
+                        ServiceTier::Standard
+                    },
+                    ..Default::default()
+                };
+                let automatic = active_presence_presentation_with_credits(
+                    PresenceSurface::Desktop,
+                    &session,
+                    None,
+                    None,
+                    &ResolvedPlan::default(),
+                    &tier,
+                    &config,
+                );
+                let payload = serde_json::to_value(build_manual_activity(
+                    &automatic,
+                    Some(100),
+                    Some(300),
+                    Some(&automatic.large_image_key),
+                ))
+                .unwrap();
+                assert_eq!(payload["name"], automatic.app_name);
+                if !automatic.details.is_empty() {
+                    assert_eq!(payload["details"], automatic.details);
+                }
+                if !automatic.state.is_empty() {
+                    assert_eq!(payload["state"], automatic.state);
+                }
+                assert_eq!(payload["assets"]["large_image"], automatic.large_image_key);
+                assert_eq!(payload["timestamps"]["start"], 100);
+                assert_eq!(payload["timestamps"]["end"], 300);
+                if let Some(key) = automatic.small_image_key {
+                    assert_eq!(payload["assets"]["small_image"], key);
+                }
+            }
+        }
     }
 
     fn custom_config() -> PresenceConfig {
@@ -3417,6 +3474,8 @@ mod manual_payload_tests {
         let config = PresenceConfig::default();
         let session = ManualSession {
             profile: ManualProfile {
+                source: String::new(),
+                session_id: None,
                 details: "Thinking · My project".into(),
                 state: "Model · High".into(),
                 timestamp_mode: "custom".into(),
@@ -3448,6 +3507,8 @@ mod manual_payload_tests {
         let config = PresenceConfig::default();
         let session = ManualSession {
             profile: ManualProfile {
+                source: String::new(),
+                session_id: None,
                 details: "Thinking · My project".into(),
                 state: String::new(),
                 timestamp_mode: "session".into(),
@@ -3471,6 +3532,8 @@ mod manual_payload_tests {
         config.privacy.enabled = true;
         let session = ManualSession {
             profile: ManualProfile {
+                source: String::new(),
+                session_id: None,
                 details: "Sensitive project".into(),
                 state: "Private text".into(),
                 timestamp_mode: "session".into(),
@@ -3486,10 +3549,14 @@ mod manual_payload_tests {
         assert_eq!(preview.state, expected.state);
         let mut presence = DiscordPresence::new(config.effective_client_id());
         presence.suppress_ipc_connect = true;
-        presence.update_manual(&session, &config, false).unwrap();
+        presence
+            .update_manual(&session, &preview, &config, false)
+            .unwrap();
         assert_eq!(presence.connect_attempts, 0);
         assert_eq!(presence.clear_attempts, 1);
-        presence.update_manual(&session, &config, false).unwrap();
+        presence
+            .update_manual(&session, &preview, &config, false)
+            .unwrap();
         assert_eq!(presence.clear_attempts, 1);
     }
 }
