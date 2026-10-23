@@ -38,6 +38,8 @@ public partial class MainWindow
 
     private void UpdateResponsiveLayout()
     {
+        MaximizeButton.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+        AutomationProperties.SetName(MaximizeButton, WindowState == WindowState.Maximized ? "Restore window" : "Maximize window");
         if (webReady) return;
         var narrow = ActualWidth < 460;
         PageScroll.Padding = new Thickness(narrow ? 16 : 24, 24, narrow ? 16 : 24, 24);
@@ -70,8 +72,6 @@ public partial class MainWindow
                 Grid.SetColumnSpan(child, narrow && index == 0 ? 3 : 1);
             }
         }
-        MaximizeButton.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
-        AutomationProperties.SetName(MaximizeButton, WindowState == WindowState.Maximized ? "Restore window" : "Maximize window");
     }
 
     private void MaximizeClick(object sender, RoutedEventArgs e)

@@ -97,6 +97,7 @@ public partial class MainWindow : Window
         InitializePresentation();
         Appearance.Apply(this, options);
         SizeChanged += (_, _) => UpdateResponsiveLayout();
+        StateChanged += (_, _) => UpdateResponsiveLayout();
         refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         refreshTimer.Tick += (_, _) =>
         {

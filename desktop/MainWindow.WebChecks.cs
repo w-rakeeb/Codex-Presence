@@ -43,6 +43,7 @@ public partial class MainWindow
             Check(backend.Options.MonitorOnly && B(backend.Snapshot?["monitoring_only"]), "Browser verification cannot publish Discord activity");
             var preview = backend.Snapshot!["preview"]!.ToJsonString();
             var configBefore = File.ReadAllText(backend.ConfigPath);
+            await VerifyResponsiveInteractions(checks);
             foreach (var target in navigation.Keys)
             {
                 await Page(target); await Capture(target);

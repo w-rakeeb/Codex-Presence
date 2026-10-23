@@ -44,6 +44,8 @@ let navigationShape = '';
 let engineShape = '';
 let breakdownShape = '';
 let railShape = '';
+let previewShape = '';
+let decisionShape = '';
 let search = '';
 const scrollPositions = new Map();
 const $ = selector => document.querySelector(selector);
@@ -53,7 +55,7 @@ function toast(message) {
   const node = document.createElement('div');
   node.className = 'alert bg-base-100 border border-base-content/10 shadow-lg text-sm';
   node.textContent = message;
-  $('#toasts').append(node);
+  $('#toasts').replaceChildren(node);
   setTimeout(() => node.remove(), 2500);
 }
 
@@ -61,7 +63,7 @@ function preview(state, editor = false) {
   const data = state.snapshot?.preview;
   const idle = !data || !state.previewVisible;
   return `<section class="card card-border bg-base-100"><div class="card-body">
-    <div class="flex items-center justify-between gap-3"><h2 class="card-title">Discord preview</h2><span class="badge badge-sm badge-ghost">${editor ? 'Saved output' : 'Live preview'}</span></div>
+    <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="card-title">Discord preview</h2><span class="badge badge-sm badge-ghost">${editor ? 'Saved output' : 'Live preview'}</span></div>
     ${state.snapshot?.manual_mode ? '<span class="badge badge-ghost badge-sm">Manual presence</span>' : ''}
     <div class="preview"><div class="text-xs muted mb-4">Playing</div>${idle ? '<div class="preview-empty"><p class="font-medium">Nothing to show yet</p><p class="text-xs muted mt-2">Send a new Codex prompt to get started.</p></div>' : `<div class="flex items-start gap-3"><img src="logo.png" class="preview-icon" alt="Codex Presence"><div class="preview-lines secondary min-w-0"><div class="preview-title" data-preview="app_name">${escape(data.app_name)}</div><div data-preview="details">${escape(data.details)}</div><div data-preview="state">${escape(data.state)}</div>${state.snapshot?.manual_mode ? `<div data-manual-timer class="text-xs mt-2">${manualTime(state.snapshot)}</div>` : ''}</div></div>`}</div>
     <p class="text-xs muted leading-relaxed">${editor ? 'This is your saved Discord text. Save your changes to update it.' : 'Text comes directly from the presence engine. Discord controls line wrapping.'}</p>
@@ -147,17 +149,35 @@ function structural(nodes) { return nodes.map(node => `${node.id}:${node.kind}:$
 function updateDashboard(state) {
   const snapshot = state.snapshot || {};
   const active = snapshot.manual_session || snapshot.sessions?.find(item => item.session_id === snapshot.active_session_id) || snapshot.sessions?.[0];
-  const nextEngine = JSON.stringify([state.visual, state.running, state.publicationEnabled, state.busy, snapshot.preview, state.previewVisible, active?.project_name, active?.model, active?.reasoning_effort]);
+  const nextEngine = JSON.stringify([state.visual, state.running, state.publicationEnabled, state.busy, !!snapshot.manual_session, active?.project_name, active?.model, active?.reasoning_effort]);
   if (nextEngine !== engineShape && !$('#engine-actions').matches(':popover-open')) {
-    $('#engine-region').innerHTML = engine(state) + preview(state);
+    const old = $('#engine-region').firstElementChild;
+    const command = old.contains(document.activeElement) ? document.activeElement.dataset.command : null;
+    const template = document.createElement('template'); template.innerHTML = engine(state);
+    old.replaceWith(template.content.firstElementChild);
+    if (command) document.querySelector(`#engine-region [data-command="${command}"]:not(:disabled)`)?.focus();
     engineShape = nextEngine;
+  }
+  const nextPreview = JSON.stringify([snapshot.preview, state.previewVisible, snapshot.manual_mode]);
+  if (nextPreview !== previewShape) {
+    const template = document.createElement('template'); template.innerHTML = preview(state);
+    $('#engine-region').lastElementChild.replaceWith(template.content.firstElementChild);
+    previewShape = nextPreview;
   }
   const totals = snapshot.metrics?.totals || {};
   const remaining = number(active?.context_window?.remaining_percent);
   const values = { token: compact(totals.total_tokens), cache: percent(number(totals.cache_hit_ratio) === null ? null : totals.cache_hit_ratio * 100), context: percent(remaining === null ? null : 100 - remaining), cost: number(totals.known_cost_usd) === null ? '—' : `$${totals.known_cost_usd.toFixed(2)}` };
   for (const [key, value] of Object.entries(values)) {
     const stat = document.querySelector(`[data-stat=${key}]`);
-    if (stat) { stat.querySelector('.stat-value').textContent = value; const progress = stat.querySelector('progress'); if (progress) progress.value = key === 'cache' ? (totals.cache_hit_ratio || 0) * 100 : remaining === null ? 0 : 100 - remaining; }
+    if (stat) {
+      const text = stat.querySelector('.stat-value'); text.textContent = value;
+      text.title = key === 'token' && number(totals.total_tokens) !== null ? totals.total_tokens.toLocaleString() : value;
+      const progress = stat.querySelector('progress');
+      if (progress) {
+        progress.value = key === 'cache' ? Math.max(0, Math.min(100, (totals.cache_hit_ratio || 0) * 100)) : remaining === null ? 0 : Math.max(0, Math.min(100, 100 - remaining));
+        progress.classList.toggle('progress-warning', key === 'context' && remaining !== null && remaining <= 20);
+      }
+    }
   }
   const nextBreakdown = JSON.stringify([totals.input_tokens, totals.cached_input_tokens, totals.output_tokens, snapshot.plan, snapshot.speed]);
   if (nextBreakdown !== breakdownShape) {
@@ -236,8 +256,12 @@ window.receive = state => {
   if (lastFooter !== state.footer && /saved\.|reloaded\.|created\.|copied/i.test(state.footer)) toast(state.footer);
   lastFooter = state.footer;
   const decision = $('#decision');
-  if (state.decision) { $('#decision-body').innerHTML = `<div class="native-stack gap-4">${state.decision.map(renderNode).join('')}</div>`; if (!decision.open) decision.showModal(); }
-  else if (decision.open) decision.close();
+  const nextDecision = JSON.stringify(state.decision);
+  if (state.decision) {
+    if (nextDecision !== decisionShape) $('#decision-body').innerHTML = `<div class="native-stack gap-4">${state.decision.map(renderNode).join('')}</div>`;
+    if (!decision.open) decision.showModal();
+  } else if (decision.open) decision.close();
+  decisionShape = nextDecision;
   lastPage = state.page;
 };
 

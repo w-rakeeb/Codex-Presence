@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## Desktop [3.2.1] - 2026-10-23
+
+### Fixed
+
+- Reflow Layout controls, Overview metrics, actions and preview badges in small windows and at 150–200% browser zoom. Keep compact navigation scrollable.
+- Preserve focused engine controls and confirmation buttons while live snapshots update.
+- Refresh full token tooltips and the context warning when usage crosses its threshold.
+- Replace repeated notifications with one current toast and update the maximize/restore caption in the web interface.
+- Add real WebView2 regression checks for clipping, keyboard focus, live telemetry, notifications and caption state. Discord formatting, settings storage and the Rust runtime remain unchanged.
+
 ## [1.13.0] - 2026-10-22
 
 ### Added

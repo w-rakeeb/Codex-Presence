@@ -1,4 +1,4 @@
-# Codex Presence 3.2.0
+# Codex Presence 3.2.1
 
 Manual presence now supports an empty optional second line. Windows connection status is based on Discord accepting the activity; rejected payloads and timeouts are reported and reconnect automatically.
 
@@ -19,6 +19,10 @@ This version uses actual daisyUI 5 and Tailwind CSS 4 in a local WebView2 interf
 Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
 
 Right-click a stat value to copy its full number, or use Copy tokens. Up/Down move between focused sidebar items; Ctrl+1 through Ctrl+5 open a page, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete design and QA limits are in `docs/desktop-design-v3.md` in the source checkout.
+
+## Resizing and accessibility
+
+Cards and form rows reflow at compact window sizes. At higher browser zoom, metrics stack vertically and the sidebar scrolls so every page remains reachable. Live token/context updates preserve keyboard focus, refresh full-value tooltips and update the context warning as usage changes. Confirmation buttons retain focus while monitoring continues.
 
 ## Reuse a recent Codex chat in Manual presence
 
