@@ -43,6 +43,7 @@ public partial class MainWindow
             Check(backend.Options.MonitorOnly && B(backend.Snapshot?["monitoring_only"]), "Browser verification cannot publish Discord activity");
             var preview = backend.Snapshot!["preview"]!.ToJsonString();
             var configBefore = File.ReadAllText(backend.ConfigPath);
+            await VerifyInterfaceRecovery(checks);
             await VerifyResponsiveInteractions(checks);
             foreach (var target in navigation.Keys)
             {
@@ -139,7 +140,10 @@ public partial class MainWindow
             WindowState = WindowState.Normal; Width = 1100; Height = 860; await Task.Delay(200);
             await Page("Manual");
             Check(await Script("document.querySelector('h1').textContent === 'Manual presence' && document.querySelector('select[aria-label=\"Timestamp option\"]').options.length === 5") == "true", "Manual presence is a separate section with all five timeline options");
-            await backend.Stop(); backend.WaitForNewWork = true; await backend.Start();
+            await backend.Stop();
+            var idleFixture = Directory.GetFiles(Path.Combine(backend.Options.CodexHome, "sessions"), "fixture.jsonl", SearchOption.AllDirectories).Single();
+            File.AppendAllText(idleFixture, JsonSerializer.Serialize(new { type = "response_item", timestamp = DateTimeOffset.UtcNow.ToString("O"), payload = new { type = "message", role = "assistant", phase = "final_answer" } }) + Environment.NewLine);
+            backend.WaitForNewWork = true; await backend.Start();
             Check(B(backend.Snapshot?["startup_waiting"]), "Automatic startup remains gated before a new real Codex prompt");
             var automaticPreview = backend.Snapshot!["preview"]!.ToJsonString();
             await Script("{ const field=document.querySelector('input[aria-label=\"Activity and project\"]'); field.value='Thinking · Manual fixture'; field.dispatchEvent(new Event('input',{bubbles:true})); const second=document.querySelector('input[aria-label=\"Second line (optional)\"]'); second.value='Model · High'; second.dispatchEvent(new Event('input',{bubbles:true})); }");

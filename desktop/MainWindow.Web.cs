@@ -23,18 +23,29 @@ public partial class MainWindow
     private Task? webInitialization;
     private DispatcherTimer? webTimer;
     private bool webReady;
+    private bool recoveringWeb;
     private string? lastWebPacket;
     private readonly ConditionalWeakTable<DependencyObject, WebKey> webKeys = new();
     private readonly Dictionary<string, FrameworkElement> webControls = new();
     private int nextWebKey;
     private sealed record WebKey(string Value);
 
-    private Task EnsureWebInterface() => webInitialization ??= InitializeWebInterface();
+    private Task EnsureWebInterface()
+    {
+        if (webInitialization?.IsCompleted == true && !webReady) webInitialization = null;
+        return webInitialization ??= InitializeWebInterface();
+    }
 
     private async Task InitializeWebInterface()
     {
         try
         {
+            if (webInterface != null)
+            {
+                var previous = webInterface; webInterface = null;
+                ShellRoot.Children.Remove(previous); previous.Dispose();
+            }
+            lastWebPacket = null;
             var folder = Path.Combine(root, "Web");
             if (!File.Exists(Path.Combine(folder, "index.html"))) throw new IOException("The bundled interface files are missing. Extract the complete release folder.");
             var canvas = ((SolidColorBrush)FindResource("Canvas")).Color;
@@ -57,11 +68,14 @@ public partial class MainWindow
             core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
             core.DownloadStarting += (_, e) => e.Cancel = true;
             core.WebMessageReceived += WebMessage;
-            core.ProcessFailed += (_, _) => { webReady = false; webInterface.Visibility = Visibility.Hidden; SetNativeViewAccess(true); Footer.Text = "The interface needs to reopen. Your settings are safe; restart the dashboard."; };
-            webTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-            webTimer.Tick += (_, _) => { if (IsVisible && webReady && !windowResizing) SendWebState(); };
+            core.ProcessFailed += (sender, e) => { if (ReferenceEquals(sender, webInterface?.CoreWebView2)) HandleWebProcessFailure(e.ProcessFailedKind); };
+            if (webTimer == null)
+            {
+                webTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                webTimer.Tick += (_, _) => { if (IsVisible && webReady && !windowResizing) SendWebState(); };
+                Closed += (_, _) => { webTimer.Stop(); webInterface?.Dispose(); };
+            }
             webTimer.Start();
-            Closed += (_, _) => { webTimer.Stop(); webInterface.Dispose(); };
             if (!testMode && windowPresentation.InterfaceRevision < 3)
             {
                 windowPresentation.InterfaceRevision = 3;
@@ -92,8 +106,41 @@ public partial class MainWindow
         }
     }
 
+    private void HandleWebProcessFailure(CoreWebView2ProcessFailedKind kind)
+    {
+        if (closing) return;
+        logs.Add("Interface process event: " + kind);
+        if (logs.Count > 150) logs.RemoveAt(0);
+        if (kind is not (CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited)) return;
+        webReady = false;
+        if (webInterface != null) webInterface.Visibility = Visibility.Hidden;
+        SetNativeViewAccess(true);
+        Footer.Text = "Restoring the interface…";
+        if (!recoveringWeb && !closing) _ = Dispatcher.InvokeAsync(RecoverWebInterface);
+    }
+
+    private async Task RecoverWebInterface()
+    {
+        if (recoveringWeb || closing) return;
+        recoveringWeb = true;
+        try
+        {
+            webTimer?.Stop();
+            for (var attempt = 0; attempt < 2 && !closing; attempt++)
+            {
+                webInitialization = null;
+                try { await EnsureWebInterface(); }
+                catch (Exception error) { ReportError(error); }
+                if (webReady) { Footer.Text = "Interface restored."; return; }
+            }
+            Footer.Text = "The interface could not reopen. Close and reopen the dashboard to retry; monitoring continues.";
+        }
+        finally { recoveringWeb = false; }
+    }
+
     private async void WebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        if (!ReferenceEquals(sender, webInterface?.CoreWebView2)) return;
         if (e.Source != "https://presence.local/index.html" || e.WebMessageAsJson.Length > 1048576) return;
         try
         {

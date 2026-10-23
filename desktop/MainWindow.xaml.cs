@@ -952,7 +952,14 @@ public partial class MainWindow : Window
         if (page == "Overview") RenderOverview();
     }
 
-    public void ShowDashboard() { Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; if (page == "Overview" && initialized) RenderOverview(); Activate(); }
+    public void ShowDashboard()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        if (page == "Overview" && initialized) RenderOverview();
+        if (initialized && !webReady && !recoveringWeb && webInitialization?.IsCompleted == true) _ = EnsureWebInterface();
+        Activate();
+    }
     private void ShowFromTray() => ShowDashboard();
     public void RequestExit() => _ = Guard(ExitApp);
 
@@ -1388,6 +1395,8 @@ public partial class MainWindow : Window
     private async Task StartupPublicationChecks(List<string> checks)
     {
         void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); checks.Add(message); }
+        var sessionFile = Directory.GetFiles(Path.Combine(backend.Options.CodexHome, "sessions"), "fixture.jsonl", SearchOption.AllDirectories).Single();
+        File.AppendAllText(sessionFile, JsonSerializer.Serialize(new { type = "event_msg", timestamp = DateTimeOffset.UtcNow.ToString("O"), payload = new { type = "task_started" } }) + Environment.NewLine);
         var isolated = new Backend(root, backend.Options, true);
         Check(isolated.Options.MonitorOnly, "Startup verification cannot publish Discord activity");
         var start = isolated.CreateStartInfo("desktop-bridge --observe");
@@ -1400,10 +1409,13 @@ public partial class MainWindow : Window
         try
         {
             await isolated.Start();
-            Check(B(isolated.Snapshot?["startup_waiting"]) && !B(isolated.Snapshot?["presence_enabled"]) && S(isolated.Snapshot?["discord_status"]) == "Waiting for new Codex activity", "Restored working sessions stay hidden at companion startup");
+            Check(!B(isolated.Snapshot?["startup_waiting"]), "A recent task already running before companion startup is detected immediately");
+            await isolated.Stop();
+            File.AppendAllText(sessionFile, JsonSerializer.Serialize(new { type = "response_item", timestamp = DateTimeOffset.UtcNow.ToString("O"), payload = new { type = "message", role = "assistant", phase = "final_answer" } }) + Environment.NewLine);
+            isolated.WaitForNewWork = true; await isolated.Start();
+            Check(B(isolated.Snapshot?["startup_waiting"]), "Completed work stays hidden when monitoring restarts");
             await isolated.Stop(); await isolated.Start();
             Check(B(isolated.Snapshot?["startup_waiting"]), "Engine restart before a new prompt preserves startup hiding");
-            var sessionFile = Directory.GetFiles(Path.Combine(backend.Options.CodexHome, "sessions"), "fixture.jsonl", SearchOption.AllDirectories).Single();
             void Append(object payload)
                 => File.AppendAllText(sessionFile, JsonSerializer.Serialize(new { type = "event_msg", timestamp = DateTimeOffset.UtcNow.ToString("O"), payload }) + Environment.NewLine);
             var previous = isolated.Snapshot;
@@ -1424,7 +1436,7 @@ public partial class MainWindow : Window
             try
             {
                 await reopened.Start();
-                Check(B(reopened.Snapshot?["startup_waiting"]), "Reopening the companion waits for another fresh prompt");
+                Check(!B(reopened.Snapshot?["startup_waiting"]), "Reopening the companion detects work already in progress");
             }
             finally { await reopened.Stop(); }
             var emptyHome = Path.Combine(backend.Options.CodexHome, "StartupEmptyHome");
@@ -1448,7 +1460,8 @@ public partial class MainWindow : Window
         var evidence = Path.Combine(root, "Data", "Verification");
         Directory.CreateDirectory(evidence);
         var connected = S(backend.Snapshot?["discord_status"]).StartsWith("Connected", StringComparison.OrdinalIgnoreCase);
-        File.WriteAllText(Path.Combine(evidence, "live-results.json"), JsonSerializer.Serialize(new { connected, startupWaiting = B(backend.Snapshot?["startup_waiting"]), presenceVisible = B(backend.Snapshot?["presence_enabled"]), status = S(backend.Snapshot?["discord_status"]), running = backend.Running, hidden = !IsVisible, everShown, trayVisible = tray.Visible, configUnchangedOnStart = configBeforeStart != null && File.ReadAllText(backend.ConfigPath) == configBeforeStart, application = S(backend.Snapshot?["preview"]?["app_name"]), sessions = backend.Snapshot?["sessions"]?.AsArray().Count ?? 0 }, Backend.JsonOptions));
+        var workingSessions = backend.Snapshot?["sessions"]?.AsArray().Count(session => S(session?["activity"]?["kind"]) is "thinking" or "reading_file" or "editing_file" or "running_command") ?? 0;
+        File.WriteAllText(Path.Combine(evidence, "live-results.json"), JsonSerializer.Serialize(new { connected, startupWaiting = B(backend.Snapshot?["startup_waiting"]), presenceVisible = B(backend.Snapshot?["presence_enabled"]), workingSessions, status = S(backend.Snapshot?["discord_status"]), running = backend.Running, hidden = !IsVisible, everShown, trayVisible = tray.Visible, configUnchangedOnStart = configBeforeStart != null && File.ReadAllText(backend.ConfigPath) == configBeforeStart, application = S(backend.Snapshot?["preview"]?["app_name"]), sessions = backend.Snapshot?["sessions"]?.AsArray().Count ?? 0 }, Backend.JsonOptions));
         Footer.Text = connected ? "Connected to Discord · presence is live." : "Engine started · " + S(backend.Snapshot?["discord_status"]);
         if (!args.Contains("--verify-background")) ShowDashboard();
     }

@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## Desktop [3.2.2] / Runtime [1.13.1] - 2026-10-24
+
+### Fixed
+
+- Keep the modern interface visible for automatically recovered WebView2 GPU events. Recover browser/main-renderer exits with up to two automatic attempts while retaining tabs, unsaved controls and the running presence engine.
+- Retry an unavailable interface when reopening the dashboard and reuse its update timer across recovery.
+- Detect recent Codex work already in progress when the companion opens. Pending tools use the configured sticky-session window; idle, completed and stale work still stays hidden.
+- Add real renderer-crash recovery and startup regressions, including long pending tools and stale-work rejection. Discord field composition and saved configuration formats remain unchanged.
+
 ## Desktop [3.2.1] - 2026-10-23
 
 ### Fixed

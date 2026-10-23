@@ -1,4 +1,4 @@
-# Codex Presence 3.2.1
+# Codex Presence 3.2.2
 
 Manual presence now supports an empty optional second line. Windows connection status is based on Discord accepting the activity; rejected payloads and timeouts are reported and reconnect automatically.
 
@@ -19,6 +19,12 @@ This version uses actual daisyUI 5 and Tailwind CSS 4 in a local WebView2 interf
 Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
 
 Right-click a stat value to copy its full number, or use Copy tokens. Up/Down move between focused sidebar items; Ctrl+1 through Ctrl+5 open a page, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete design and QA limits are in `docs/desktop-design-v3.md` in the source checkout.
+
+## Interface recovery and work detection
+
+The modern interface stays active when WebView2 automatically recovers a GPU process. If the browser or main renderer exits, the dashboard rebuilds its web view with up to two automatic attempts. The current tab, unsaved controls and running presence engine are preserved. Reopening a failed dashboard retries initialization. A genuinely unavailable WebView2 installation still uses the native fallback.
+
+Starting the companion detects recent Codex work already in progress. Pending commands use the existing sticky-session window, so longer tools can be detected without another prompt. Idle, completed and stale sessions stay hidden until real work starts. Pause, privacy, manual mode and app priority continue to apply.
 
 ## Resizing and accessibility
 
@@ -103,7 +109,7 @@ Use the **Appearance**, **Activity**, **Background** and **Advanced** section bu
 - **Keep active session:** 60–86400 seconds, default 3600.
 - **Keep running when the window closes:** the X hides the dashboard; the engine continues. Reopen the executable or double-click the tray icon to return. Choose Exit to stop everything.
 - **Hide the system tray icon:** remove the icon while the app continues running. Combine with background launch or Run in background for a fully hidden dashboard. Reopen `Codex Presence.exe` to restore the existing window, then choose Exit when you want to stop it.
-- **Startup publication:** the desktop engine waits for a new Codex prompt or task after this companion opens. Until then Discord presence stays hidden and the dashboard reports “Waiting for new Codex activity.” Restored chats and background token or metadata updates do not count. After work begins, your existing idle timeout, Pause and app priority settings apply. Engine restarts inside the same companion session keep this state; closing and reopening the companion begins a new wait.
+- **Startup publication:** the desktop engine detects recent work already in progress, including pending tools within the configured sticky-session window. An idle or completed chat stays hidden until a real Codex prompt or task starts. Background token or metadata updates alone do not count. Your idle timeout, Pause and app priority settings still apply. Reopening the companion checks again for current work.
 - **Start presence when opening:** optional automatic engine launch on future opens.
 - **Open in background and start presence:** future launches start the engine and hide the dashboard automatically. This also starts presence when the separate automatic-start option is off.
 - **Start with Windows:** optional current-user Run entry. Starts the engine in the background at sign-in without showing a window. It takes effect when you save; initially off. Disable it here before moving the app.

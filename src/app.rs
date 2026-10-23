@@ -752,6 +752,40 @@ struct StartupPublicationGate {
 }
 
 impl StartupPublicationGate {
+    fn observe_activity<'a>(
+        &mut self,
+        activities: impl Iterator<Item = &'a crate::session::SessionActivitySnapshot> + Clone,
+        now: DateTime<Utc>,
+        max_age: Duration,
+        pending_max_age: Duration,
+    ) -> bool {
+        if self.waiting_since.is_some()
+            && activities.clone().any(|activity| {
+                matches!(
+                    activity.kind,
+                    crate::session::SessionActivityKind::Thinking
+                        | crate::session::SessionActivityKind::ReadingFile
+                        | crate::session::SessionActivityKind::EditingFile
+                        | crate::session::SessionActivityKind::RunningCommand
+                ) && activity.last_work_started_at.is_some()
+                    && activity.observed_at.is_some_and(|observed| {
+                        now.signed_duration_since(observed)
+                            .to_std()
+                            .is_ok_and(|age| {
+                                age <= if activity.pending_calls > 0 {
+                                    pending_max_age
+                                } else {
+                                    max_age
+                                }
+                            })
+                    })
+            })
+        {
+            self.waiting_since = None;
+        }
+        self.observe(activities.filter_map(|activity| activity.last_work_started_at))
+    }
+
     fn observe(&mut self, work_started_at: impl Iterator<Item = DateTime<Utc>>) -> bool {
         if let Some(since) = self.waiting_since
             && work_started_at.into_iter().any(|started| started > since)
@@ -919,11 +953,14 @@ pub fn run_desktop_bridge(
             }
         });
         let priority_held = priority.load(Ordering::Relaxed);
-        let waiting_for_real_work = startup_gate.observe(
+        let waiting_for_real_work = startup_gate.observe_activity(
             snapshot
                 .sessions
                 .iter()
-                .filter_map(|session| session.activity.as_ref()?.last_work_started_at),
+                .filter_map(|session| session.activity.as_ref()),
+            Utc::now(),
+            runtime.stale_threshold,
+            runtime.active_sticky_window,
         );
         let startup_waiting = waiting_for_real_work && manual.is_none();
         let active = snapshot.active_session();
@@ -1730,6 +1767,102 @@ fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interva
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_recognizes_an_already_running_task() {
+        let now = Utc::now();
+        let mut gate = StartupPublicationGate {
+            waiting_since: Some(now),
+        };
+        let activity = crate::session::SessionActivitySnapshot {
+            kind: crate::session::SessionActivityKind::RunningCommand,
+            last_work_started_at: Some(now - chrono::Duration::minutes(5)),
+            observed_at: Some(now - chrono::Duration::seconds(20)),
+            ..Default::default()
+        };
+        assert!(
+            !gate.observe_activity(
+                std::iter::once(&activity),
+                now,
+                Duration::from_secs(90),
+                Duration::from_secs(3600)
+            ),
+            "An already-running Codex task should not need another prompt"
+        );
+        assert!(!gate.observe_activity(
+            std::iter::empty(),
+            now,
+            Duration::from_secs(90),
+            Duration::from_secs(3600)
+        ));
+    }
+
+    #[test]
+    fn startup_does_not_resume_idle_completed_or_stale_work() {
+        use crate::session::{SessionActivityKind, SessionActivitySnapshot};
+        let now = Utc::now();
+        for kind in [
+            SessionActivityKind::Idle,
+            SessionActivityKind::WaitingInput,
+            SessionActivityKind::Thinking,
+        ] {
+            let mut gate = StartupPublicationGate {
+                waiting_since: Some(now),
+            };
+            let activity = SessionActivitySnapshot {
+                kind: kind.clone(),
+                last_work_started_at: Some(now - chrono::Duration::minutes(5)),
+                observed_at: Some(
+                    now - chrono::Duration::seconds(if kind == SessionActivityKind::Thinking {
+                        91
+                    } else {
+                        1
+                    }),
+                ),
+                ..Default::default()
+            };
+            assert!(gate.observe_activity(
+                std::iter::once(&activity),
+                now,
+                Duration::from_secs(90),
+                Duration::from_secs(3600)
+            ));
+        }
+    }
+
+    #[test]
+    fn startup_keeps_a_long_running_pending_tool_active() {
+        let now = Utc::now();
+        let mut gate = StartupPublicationGate {
+            waiting_since: Some(now),
+        };
+        let activity = crate::session::SessionActivitySnapshot {
+            kind: crate::session::SessionActivityKind::RunningCommand,
+            last_work_started_at: Some(now - chrono::Duration::minutes(8)),
+            observed_at: Some(now - chrono::Duration::minutes(5)),
+            pending_calls: 1,
+            ..Default::default()
+        };
+        assert!(!gate.observe_activity(
+            std::iter::once(&activity),
+            now,
+            Duration::from_secs(90),
+            Duration::from_secs(3600)
+        ));
+        let stale = crate::session::SessionActivitySnapshot {
+            observed_at: Some(now - chrono::Duration::hours(2)),
+            ..activity
+        };
+        let mut gate = StartupPublicationGate {
+            waiting_since: Some(now),
+        };
+        assert!(gate.observe_activity(
+            std::iter::once(&stale),
+            now,
+            Duration::from_secs(90),
+            Duration::from_secs(3600)
+        ));
+    }
 
     #[test]
     fn startup_publication_waits_for_new_work_and_stays_unlocked() {
