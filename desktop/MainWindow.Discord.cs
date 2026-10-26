@@ -21,7 +21,7 @@ public partial class MainWindow
         var id = EditText(card, application, "application_id", "Custom Application ID", true, 32);
         AttachFieldFeedback(id);
         var images = new StackPanel();
-        images.Children.Add(Text("Upload images to your application's Rich Presence → Art Assets. Enter their asset keys below; leave a key blank to omit its image.", 13, Muted));
+        images.Children.Add(Text("Enter a public HTTPS image URL or an asset key from your application's Rich Presence → Art Assets. Leave a key blank to omit its image.", 13, Muted));
         var large = EditText(images, application, "large_image_key", "Custom large image key", maximum: 256);
         var small = EditText(images, application, "small_image_key", "Custom small image key", true, 256);
         var artwork = new Expander { Header = "Custom application images", Content = images, Margin = new Thickness(0, 8, 0, 8) };

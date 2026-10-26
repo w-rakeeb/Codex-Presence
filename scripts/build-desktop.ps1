@@ -21,10 +21,8 @@ New-Item -ItemType Directory -Path $taskRuntime -Force | Out-Null
 if ($EngineDirectory -and -not $SkipEngine) { throw 'EngineDirectory is only supported with SkipEngine.' }
 $taskEngines = if ($EngineDirectory) { [IO.Path]::GetFullPath($EngineDirectory) } else { Join-Path $taskProject 'releases\windows' }
 Get-ChildItem -LiteralPath $taskEngines -File | Copy-Item -Destination $taskRuntime
-$taskIconCache = Join-Path $taskProject '.build\target'
-$taskIcon = if (Test-Path -LiteralPath $taskIconCache) { Get-ChildItem -LiteralPath $taskIconCache -Filter 'codex-app.ico' -Recurse -File | Select-Object -First 1 } else { $null }
-if ($null -ne $taskIcon) { Copy-Item -LiteralPath $taskIcon.FullName -Destination (Join-Path $taskProject 'desktop\app.ico') }
 $taskDesktopIcon = Join-Path $taskProject 'desktop\Assets\app.ico'
+Copy-Item -LiteralPath $taskDesktopIcon -Destination (Join-Path $taskProject 'desktop\app.ico') -Force
 Copy-Item -LiteralPath $taskDesktopIcon -Destination (Join-Path $taskRuntime 'app.ico')
 Copy-Item -LiteralPath (Join-Path $taskProject 'desktop\Assets') -Destination $taskOutput -Recurse -Force
 Push-Location (Join-Path $taskProject 'desktop\Web')

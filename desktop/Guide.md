@@ -1,4 +1,4 @@
-# Codex Presence 3.2.2
+# Codex Presence 3.2.3
 
 Manual presence now supports an empty optional second line. Windows connection status is based on Discord accepting the activity; rejected payloads and timeouts are reported and reconnect automatically.
 
@@ -19,6 +19,12 @@ This version uses actual daisyUI 5 and Tailwind CSS 4 in a local WebView2 interf
 Choose System, Dark or Light in Appearance. System following and window geometry/last tab use `Data/window-state.json`; existing settings files retain their formats. Save/Reload and retained drafts work as before. Discord text is never rewritten by the visual theme. App and tray artwork are local; existing Discord application artwork is unchanged.
 
 Right-click a stat value to copy its full number, or use Copy tokens. Up/Down move between focused sidebar items; Ctrl+1 through Ctrl+5 open a page, and Ctrl+S saves the current draft. Reduced motion and high-contrast resources follow Windows. Complete design and QA limits are in `docs/desktop-design-v3.md` in the source checkout.
+
+## Product artwork and shell
+
+The approved cloud/terminal mark is used for the window, executable, tray, shortcut, in-app preview and current release artwork. The title bar carries the product name once. Live status appears in a framed card at the bottom of the sidebar, above the bordered Run in background button. Compact windows retain named icon controls.
+
+Discord accepts a public HTTPS image URL as a large-image value. Fresh defaults use the release's versioned approved PNG. Existing explicitly configured image choices are preserved. The developer application's own General Information icon is a separate Discord setting.
 
 ## Interface recovery and work detection
 

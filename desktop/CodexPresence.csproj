@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>Codex Presence</AssemblyName>
-    <Version>3.2.2</Version>
+    <Version>3.2.3</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <StartupObject>CodexPresence.Program</StartupObject>

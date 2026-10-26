@@ -21,6 +21,7 @@ const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
 const CONFIG_SCHEMA_VERSION: u32 = 18;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
+pub const PRODUCT_LOGO_URL: &str = "https://raw.githubusercontent.com/w-rakeeb/Codex-Presence/desktop-v3.2.3/assets/branding/codex-presence.png";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
     "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247";
 
@@ -62,7 +63,7 @@ impl Default for DiscordApplicationConfig {
         Self {
             mode: DiscordApplicationMode::Default,
             application_id: None,
-            large_image_key: "codex-app".to_string(),
+            large_image_key: PRODUCT_LOGO_URL.to_string(),
             small_image_key: Some("openai".to_string()),
         }
     }
@@ -625,9 +626,9 @@ impl Default for DisplayConfig {
             idle_timeout_minutes: 0,
             separate_usage_line: true,
             activity_project_heading: false,
-            large_image_key: "codex-logo".to_string(),
+            large_image_key: PRODUCT_LOGO_URL.to_string(),
             large_text: "Codex".to_string(),
-            desktop_large_image_key: "codex-app".to_string(),
+            desktop_large_image_key: PRODUCT_LOGO_URL.to_string(),
             desktop_large_text: "Codex App".to_string(),
             small_image_key: "openai".to_string(),
             small_text: "OpenAI".to_string(),
@@ -1521,7 +1522,7 @@ mod tests {
             cfg.display.desktop_presence_design,
             DesktopPresenceDesign::CodexApp
         );
-        assert_eq!(cfg.display.desktop_large_image_key, "codex-app");
+        assert_eq!(cfg.display.desktop_large_image_key, PRODUCT_LOGO_URL);
         assert_eq!(cfg.display.desktop_large_text, "Codex App");
     }
 

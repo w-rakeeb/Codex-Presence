@@ -11,13 +11,12 @@
 <body>
   <div class="app-shell">
     <aside class="app-sidebar" aria-label="Main navigation">
-      <div class="sidebar-brand"><img src="logo.png" alt=""><div class="sidebar-copy">Codex Presence</div></div>
       <ul class="menu" id="navigation"></ul>
-      <div class="mt-auto pt-6">
-        <div class="border-t border-base-content/10 pt-4 px-2">
-          <div class="flex items-center gap-2"><span id="sidebar-status" class="status status-sm"></span><span id="sidebar-state" class="sidebar-footer-copy text-xs font-medium">Starting</span></div>
-          <button class="btn btn-ghost btn-sm mt-3 w-full" data-command="background" title="Keep monitoring in the background"><span id="background-icon"></span><span class="sidebar-footer-copy">Run in background</span></button>
+      <div class="sidebar-bottom mt-auto pt-6">
+        <div class="sidebar-presence card card-border bg-base-200" role="status" aria-live="polite" aria-atomic="true">
+          <span id="sidebar-status" class="status status-sm" aria-hidden="true"></span><span id="sidebar-state" class="sidebar-footer-copy text-xs font-medium">Starting</span>
         </div>
+        <button class="btn btn-sm background-button w-full" data-command="background" aria-label="Run in background" title="Keep monitoring in the background"><span id="background-icon"></span><span class="sidebar-footer-copy">Run in background</span></button>
       </div>
     </aside>
     <main class="app-main">

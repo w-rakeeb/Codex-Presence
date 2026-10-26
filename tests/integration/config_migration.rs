@@ -100,7 +100,10 @@ fn non_codex_identity_is_rewritten_to_codex_identity() {
         config.discord_client_id_desktop.as_deref(),
         Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID)
     );
-    assert_eq!(config.display.large_image_key, "codex-logo");
+    assert_eq!(
+        config.display.large_image_key,
+        "https://raw.githubusercontent.com/w-rakeeb/Codex-Presence/desktop-v3.2.3/assets/branding/codex-presence.png"
+    );
     assert_eq!(config.display.large_text, "Codex");
     assert_eq!(config.display.small_image_key, "openai");
     assert_eq!(config.display.small_text, "OpenAI");

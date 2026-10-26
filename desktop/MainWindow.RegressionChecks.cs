@@ -15,6 +15,9 @@ public partial class MainWindow
         var failures = new List<string>();
         void Verify(bool result, string label) { if (result) checks.Add(label); else failures.Add(label); }
         async Task<string> Script(string code) => await webInterface!.CoreWebView2.ExecuteScriptAsync(code);
+        Verify(await Script("document.querySelector('.sidebar-brand') === null") == "true", "The title bar is the only product-name header");
+        Verify(await Script("(() => { const button=document.querySelector('.app-sidebar [data-command=background]'); return button && !button.classList.contains('btn-ghost') && parseFloat(getComputedStyle(button).borderTopWidth) >= 1; })()") == "true", "Background action has a visible button surface and border");
+        Verify(await Script("(() => { const box=document.querySelector('.sidebar-presence'); return box && box.contains(document.querySelector('#sidebar-state')) && parseFloat(getComputedStyle(box).borderTopWidth) >= 1; })()") == "true", "Live status is inside a dedicated sidebar card");
         var interactionFailures = await Script("""
             (() => {
               const original = structuredClone(current), failures = [];

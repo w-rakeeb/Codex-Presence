@@ -1811,6 +1811,37 @@ mod tests {
     }
 
     #[test]
+    fn approved_brand_artwork_preserves_application_ids_and_custom_overrides() {
+        let mut config = PresenceConfig::default();
+        let logo = "https://raw.githubusercontent.com/w-rakeeb/Codex-Presence/desktop-v3.2.3/assets/branding/codex-presence.png";
+        assert_eq!(
+            config.discord_client_id.as_deref(),
+            Some("1470480085453770854")
+        );
+        assert_eq!(
+            config.discord_client_id_desktop.as_deref(),
+            Some("1478395304624652345")
+        );
+        for surface in [
+            PresenceSurface::Cli,
+            PresenceSurface::VsCode,
+            PresenceSurface::Desktop,
+        ] {
+            assert_eq!(
+                idle_presence_presentation(surface, &config).large_image_key,
+                logo
+            );
+        }
+        config.discord_application.mode = crate::config::DiscordApplicationMode::Custom;
+        config.discord_application.application_id = Some("123456789012345678".into());
+        config.discord_application.large_image_key = "user-chosen-art".into();
+        assert_eq!(
+            idle_presence_presentation(PresenceSurface::Desktop, &config).large_image_key,
+            "user-chosen-art"
+        );
+    }
+
+    #[test]
     fn recent_manual_activity_keeps_automatic_fields_assets_and_privacy_with_custom_time() {
         for fast in [false, true] {
             for private in [false, true] {

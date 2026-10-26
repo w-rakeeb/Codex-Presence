@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## Desktop [3.2.3] / Runtime [1.13.2] - 2026-10-27
+
+### Changed
+
+- Apply the owner-approved cloud/terminal logo to current app, executable, window/taskbar, tray, shortcut, preview and release artwork, with versioned HTTPS artwork defaults for Rich Presence.
+- Keep one product identity in the title bar; remove the repeated sidebar branding.
+- Place live status in a framed bottom-left card and give Run in background a distinct button surface and border.
+- Preserve application IDs, custom artwork overrides, presence text, behavior and configuration formats. The independent Old Design installation remains preserved.
+
 ## Desktop [3.2.2] / Runtime [1.13.1] - 2026-10-24
 
 ### Fixed

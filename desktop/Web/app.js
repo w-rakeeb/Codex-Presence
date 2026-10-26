@@ -230,6 +230,8 @@ window.receive = state => {
   }
   $('#sidebar-status').className = `status status-sm ${toneClass(state.visual.tone)}`;
   $('#sidebar-state').textContent = state.visual.headline;
+  document.querySelector('.sidebar-presence').setAttribute('aria-label', state.visual.headline);
+  document.querySelector('.sidebar-presence').title = state.visual.headline;
   if (nextShape !== shape) {
     const heading = `<header class="page-heading"><div><h1>${state.page === 'Overview' ? 'Your workspace' : state.page === 'Manual' ? 'Manual presence' : state.page}</h1><p class="secondary text-sm">${descriptions[state.page]}</p></div>${state.page !== 'Overview' ? `<label class="input input-sm settings-search bg-base-100 border-base-content/15">${icon('search')}<input id="setting-search" type="search" placeholder="Find in this section" aria-label="Find settings" value="${escape(search)}"></label>` : '<span class="badge badge-ghost badge-sm">Desktop companion</span>'}</header>`;
     const oldScroll = $('#scroll').scrollTop;
